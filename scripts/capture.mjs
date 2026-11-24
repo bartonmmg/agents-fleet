@@ -2,7 +2,7 @@
 /**
  * Capturas de Fleet Studio para verificar cambios visuales (sin dependencias: usa Edge/Chrome instalado).
  *
- *   node scripts/capture.mjs [--out .fleet-evidence] [--name prefijo] [--paths /,/otra]
+ *   node scripts/capture.mjs [--out .fleet-evidence] [--name prefijo] [--paths /,/#/informe]
  *
  * Levanta Studio con agentes simulados sobre una tienda demo con tareas en todos los estados
  * (propuestas, en cola, listas, que necesitan ayuda, integradas) y saca capturas en
@@ -84,6 +84,11 @@ const VIEWS = [
 ];
 const SCHEMES = [{ name: 'claro', flag: 'preferredColorScheme=1' }, { name: 'oscuro', flag: 'preferredColorScheme=0' }];
 const shots = [];
+// El ?snapshot=1 va antes del #: las rutas de la UI (por ejemplo /#/informe) viven en el hash.
+const snapshotUrl = (p) => {
+  const [pathPart, hash = ''] = p.split('#');
+  return `${base}${pathPart || '/'}${pathPart.includes('?') ? '&' : '?'}snapshot=1${hash ? `#${hash}` : ''}`;
+};
 for (const p of paths) {
   const slug = p === '/' ? 'inicio' : p.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '');
   for (const v of VIEWS) {
@@ -93,7 +98,7 @@ for (const p of paths) {
         '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run', '--no-default-browser-check',
         `--user-data-dir=${path.join(tmp, `profile-${v.name}-${s.name}`)}`,
         `--window-size=${v.size}`, `--blink-settings=${s.flag}`, '--virtual-time-budget=6000',
-        `--screenshot=${file}`, `${base}${p}${p.includes("?") ? "&" : "?"}snapshot=1`,
+        `--screenshot=${file}`, snapshotUrl(p),
       ], 30_000);
       if (fs.existsSync(file)) shots.push(file);
       else console.error(`No se pudo capturar ${file}: ${r.stderr}`.slice(0, 300));

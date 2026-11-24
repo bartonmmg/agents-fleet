@@ -24,12 +24,14 @@ const ICONS = {
   report: '<path d="M4 19V5M4 19h16M8 15v-4M12 15V8M16 15v-6"/>',
   pause2: '<circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/>',
   moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+  back: '<path d="M19 12H5M11 18l-6-6 6-6"/>',
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
 };
 const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 
 // ---------- estado ----------
-const S = { state: null, selected: null, task: null, activity: [], diff: null, connected: false };
+const S = { state: null, selected: null, task: null, activity: [], diff: null, connected: false, report: { hours: 24, markdown: null, loading: false, audit: null, auditing: false } };
 
 // localStorage puede no estar disponible (modo privado, datos bloqueados): todo con try/catch.
 // Si no hay, se recuerda en memoria hasta recargar la página.
@@ -119,7 +121,14 @@ function connect() {
 // ---------- render general ----------
 function render() {
   renderTopbar();
+  renderMain();
+}
+
+/** Rutas: el tablero (#/ o vacío) y el informe (#/informe). */
+const isReportRoute = () => location.hash === '#/informe';
+function renderMain() {
   if (!S.state?.project) renderWelcome();
+  else if (isReportRoute()) renderReport();
   else renderBoard();
 }
 
@@ -145,7 +154,7 @@ function renderTopbar() {
       ${live
     ? `<button data-action="pause">${icon('pause')} Pausar</button>`
     : `<button class="primary" data-action="start" ${st.running ? 'disabled' : ''}>${icon('play')} Iniciar</button>`}
-      <button class="ghost" data-action="report" title="Informe">${icon('report')}</button>
+      <button class="ghost ${isReportRoute() ? 'is-current' : ''}" data-action="report" title="Informe" aria-label="Informe" ${isReportRoute() ? 'aria-current="page"' : ''}>${icon('report')}</button>
       <button class="ghost" data-action="settings" title="Configuración">${icon('gear')}</button>`;
   } else {
     html += '<span class="spacer"></span>';
@@ -359,7 +368,7 @@ async function openTask(id) {
   $('#drawer').classList.add('open');
   $('#drawer').setAttribute('aria-hidden', 'false');
   $('#scrim').classList.add('open');
-  renderBoard();
+  renderMain();
   await refreshTask();
   S.activity = await api('GET', `/api/tasks/${id}/activity`).catch(() => []);
   renderActivity();
@@ -371,7 +380,7 @@ function closeTask() {
   $('#drawer').classList.remove('open');
   $('#drawer').setAttribute('aria-hidden', 'true');
   $('#scrim').classList.remove('open');
-  if (S.state?.project) renderBoard();
+  if (S.state?.project) renderMain();
 }
 
 let refreshing = null;
@@ -798,25 +807,108 @@ async function createDemo() {
   }
 }
 
-async function reportDialog() {
-  const r = await act(() => api('GET', '/api/report'));
-  if (!r) return;
-  openDialog(`<div class="body">
-    <h2>Informe</h2>
-    <div class="md">${md(r.markdown.replace(/^# .*\n/, ''))}</div>
-    <div class="buttons">
-      <button type="button" id="run-audit" title="Usa tu plan de Claude">${icon('spark')} Auditar calidad (últimos 7 días)</button>
-      <button type="button" class="primary" data-close>Cerrar</button>
+// ---------- informe (página propia en #/informe) ----------
+const RANGES = [[24, 'Últimas 24 h'], [72, '3 días'], [168, '7 días']];
+
+async function loadReport() {
+  const R = S.report;
+  R.loading = true;
+  renderMain();
+  const r = await act(() => api('GET', `/api/report?hours=${R.hours}`));
+  R.loading = false;
+  if (r) R.markdown = r.markdown;
+  if (isReportRoute()) renderMain();
+}
+
+/** Barras horizontales simples (HTML con anchos proporcionales; el número siempre visible). */
+function hbars(rows) {
+  const max = Math.max(1, ...rows.map((r) => r.n));
+  return `<ul class="hbars">${rows.map((r) => `<li><span class="hb-lbl">${r.label}</span>
+    <span class="hb-track"><span class="hb-fill ${r.tone}" style="width:${r.n ? Math.max(3, Math.round((r.n / max) * 100)) : 0}%"></span></span>
+    <span class="hb-n">${r.n}</span></li>`).join('')}</ul>`;
+}
+
+function autopilotCard() {
+  const st = S.state;
+  const night = st.autopilot?.lastNight;
+  const sched = st.config.schedule;
+  if (!night) {
+    return `<div class="panel-card"><h2>${icon('moon')} Autopilot</h2>
+      <p class="muted">${sched?.enabled ? `Programado de ${esc(sched.window)}. Todavía no corrió ninguna noche.` : 'Apagado. Activalo en Configuración para que la flota trabaje sola de noche, con las reglas que elijas.'}</p>
+      ${sched?.enabled ? '' : `<button data-action="settings">${icon('gear')} Configurar Autopilot</button>`}</div>`;
+  }
+  const from = Date.parse(night.startedAt);
+  // Desde que empezó la noche: los agentes en curso terminan su tarea aunque la ventana ya haya cerrado.
+  const auto = st.tasks.filter((t) => t.status === 'merged' && t.mergedBy === 'autopilot' && Date.parse(t.mergedAt) >= from).length;
+  const reverted = st.tasks.filter((t) => t.reverted && Date.parse(t.updatedAt) >= from).length;
+  const stat = (n, l, tone = '') => `<div class="mini-stat ${n ? tone : ''}"><b>${n}</b><span>${l}</span></div>`;
+  return `<div class="panel-card"><h2>${icon('moon')} Autopilot · última noche</h2>
+    <p class="muted">${new Date(from).toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' })}, de ${hhmm(night.startedAt)} a ${night.endedAt ? hhmm(night.endedAt) : 'ahora (en curso)'}.</p>
+    <div class="mini-stats">
+      ${stat(night.proposed || 0, 'propuestas del Product Manager', 'accent')}
+      ${stat(night.autoAccepted || 0, 'aprobadas solas por la política', 'accent')}
+      ${stat(auto, auto === 1 ? 'integrada sola' : 'integradas solas', 'ok')}
+      ${stat(reverted, reverted === 1 ? 'revertida' : 'revertidas', 'bad')}
+    </div></div>`;
+}
+
+function renderReport() {
+  const st = S.state;
+  const R = S.report;
+  if (R.markdown === null && !R.loading) { loadReport(); return; }
+  const count = (status) => st.tasks.filter((t) => t.status === status).length;
+  const m = st.metrics;
+  $('#main').innerHTML = `<div class="page">
+    <div class="page-head">
+      <a class="back" href="#/">${icon('back')} Tablero</a>
+      <h1>Informe</h1>
+      <div class="segmented" role="group" aria-label="Período del informe">${RANGES.map(([h, l]) => `<button type="button" data-action="report-range" data-hours="${h}" aria-pressed="${R.hours === h}" class="${R.hours === h ? 'on' : ''}">${l}</button>`).join('')}</div>
     </div>
-    <div id="audit-out" class="md"></div>
-  </div>`);
-  $('#run-audit').addEventListener('click', async (e) => {
-    e.target.disabled = true;
-    $('#audit-out').innerHTML = '<p class="hint">El Auditor de calidad está revisando los commits recientes. Puede tardar unos minutos…</p>';
-    const a = await act(() => api('POST', '/api/audit'));
-    $('#audit-out').innerHTML = a ? `<h3>Auditoría de calidad</h3>${md(a.text)}` : '';
-    e.target.disabled = false;
-  });
+    <div class="report-grid">
+      <div class="panel-card"><h2>${icon('report')} Integraciones por día</h2>
+        <p class="muted">${m.merged7d} en los últimos 7 días · ${m.firstTryRate === null ? 'sin datos de primer intento' : `${m.firstTryRate}% al primer intento`}</p>
+        <div class="chart-lg">${weekChart(m.perDay)}</div></div>
+      <div class="panel-card"><h2>${icon('clock')} Estado de las tareas ahora</h2>
+        ${hbars([
+    { label: 'Esperan tu OK', n: count('ready_to_merge'), tone: 'ok' },
+    { label: 'Necesitan tu ayuda', n: count('needs_human'), tone: 'bad' },
+    { label: 'Propuestas', n: count('proposed'), tone: 'warn' },
+    { label: 'En cola', n: count('queued'), tone: 'neutral' },
+    { label: 'Trabajando', n: count('running') + count('merging'), tone: 'run' },
+  ])}</div>
+      ${autopilotCard()}
+    </div>
+    <div class="panel-card">
+      <div class="card-head"><h2>${icon('file')} Detalle</h2>
+        <button type="button" data-action="copy-report" ${R.markdown ? '' : 'disabled'}>${icon('copy')} Copiar markdown</button></div>
+      ${R.loading && !R.markdown ? '<p class="muted">Armando el informe…</p>' : `<div class="md report-md">${md((R.markdown || '').replace(/^# .*\n/, ''))}</div>`}
+    </div>
+    <div class="panel-card">
+      <div class="card-head"><h2>${icon('spark')} Auditoría de calidad</h2>
+        <button type="button" data-action="run-audit" ${R.auditing ? 'disabled' : ''} title="Usa tu plan de Claude">${R.auditing ? '<span class="pulse"></span> Auditando…' : `${icon('spark')} Auditar últimos 7 días`}</button></div>
+      ${R.auditing ? '<p class="muted">El Auditor de calidad está revisando los commits recientes. Puede tardar unos minutos…</p>'
+    : R.audit ? `<div class="md">${md(R.audit)}</div>` : '<p class="muted">Un agente revisa los commits integrados en la última semana y señala desprolijidades que se repiten, para convertirlas en reglas.</p>'}
+    </div>
+  </div>`;
+}
+
+async function runAuditFromReport() {
+  const R = S.report;
+  R.auditing = true;
+  renderMain();
+  const a = await act(() => api('POST', '/api/audit'));
+  R.auditing = false;
+  if (a) R.audit = a.text;
+  renderMain();
+}
+
+async function copyReport() {
+  try {
+    await navigator.clipboard.writeText(S.report.markdown || '');
+    toast('Informe copiado en markdown');
+  } catch {
+    toast('No se pudo copiar: el navegador no dio permiso', 'error');
+  }
 }
 
 // ---------- eventos ----------
@@ -846,12 +938,20 @@ document.addEventListener('click', async (e) => {
     case 'pause': return act(() => api('POST', '/api/run/pause'), 'Pausando: los agentes terminan el paso actual');
     case 'settings': return settingsDialog();
     case 'projects': return projectsDialog();
-    case 'report': return reportDialog();
+    case 'report':
+      if (isReportRoute()) { S.report.markdown = null; return renderMain(); }
+      location.hash = '#/informe';
+      return undefined;
+    case 'report-range':
+      S.report.hours = Number(el.dataset.hours);
+      return loadReport();
+    case 'copy-report': return copyReport();
+    case 'run-audit': return runAuditFromReport();
     case 'demo': return createDemo();
     case 'goto-column': return gotoColumn(el.dataset.col);
     case 'dismiss-recap':
       store.set(visitKey(), new Date().toISOString());
-      return renderBoard();
+      return renderMain();
     case 'open-recent': return openProject(el.dataset.path);
     case 'close': return closeTask();
     case 'approve': {
@@ -881,6 +981,12 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.matches?.('.card')) openTask(e.target.dataset.task);
 });
 $('#scrim').addEventListener('click', closeTask);
+window.addEventListener('hashchange', () => {
+  if (isReportRoute()) S.report.markdown = null; // al entrar, el informe se arma de nuevo
+  closeTask();
+  render();
+  window.scrollTo(0, 0);
+});
 
 // ?snapshot=1: carga el estado una sola vez, sin conexión en vivo (para capturas automáticas).
 if (new URLSearchParams(location.search).has('snapshot')) {

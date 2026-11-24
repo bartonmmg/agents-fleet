@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { Engine } from '../src/studio/engine.mjs';
-import { createStudioServer, listDirs } from '../src/studio/server.mjs';
+import { createStudioServer, listDirs, reportHours } from '../src/studio/server.mjs';
 import { FLEET_ROOT } from '../src/studio/index.mjs';
 import { DEMO_AUTHOR } from '../src/studio/demo.mjs';
 import { applyGitIdentity } from '../src/config.mjs';
@@ -65,6 +65,14 @@ test('rechaza un Host que no sea local (DNS rebinding)', async () => {
     http.get({ host: '127.0.0.1', port: server.address().port, path: '/api/state', headers: { host: 'evil.example.com' } }, (res) => { res.resume(); resolve(res.statusCode); });
   });
   assert.equal(status, 403);
+});
+
+test('reportHours acota el período del informe', () => {
+  assert.equal(reportHours(null), 24);
+  assert.equal(reportHours('abc'), 24);
+  assert.equal(reportHours('168'), 168);
+  assert.equal(reportHours('0'), 24);
+  assert.equal(reportHours('99999'), 720);
 });
 
 test('listDirs lista subcarpetas y marca repos', () => {
@@ -134,6 +142,8 @@ test('flujo completo: demo → iniciar → aprobar desde la API', async () => {
   assert.equal(metrics.perDay.length, 7);
   assert.ok(metrics.runsToday > 0);
   assert.deepEqual((await call('GET', '/api/state')).data.metrics, metrics);
+  assert.match((await call('GET', '/api/report')).data.markdown, /últimas 24 h/);
+  assert.match((await call('GET', '/api/report?hours=168')).data.markdown, /últimas 168 h/);
 
   // El diff sigue disponible después de integrar (la rama ya no existe)
   assert.match((await call('GET', '/api/tasks/1/diff')).data.diff, /fleet-fake-1\.txt/);

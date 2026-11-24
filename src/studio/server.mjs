@@ -32,6 +32,9 @@ function readBody(req) {
   });
 }
 
+/** Período del informe: 24 h por defecto, entre 1 h y 30 días. */
+export const reportHours = (v) => Math.min(720, Math.max(1, Math.round(Number(v)) || 24));
+
 /** Lista subcarpetas para el explorador de carpetas de la UI. Sin ruta: unidades (Windows) o el home. */
 export function listDirs(dir) {
   if (!dir) {
@@ -96,7 +99,7 @@ export function createStudioServer({ engine, fleetRoot, token = crypto.randomByt
     ['POST', /^\/api\/tasks\/(\d+)\/request-changes$/, (m, b) => { engine.requestChanges(m[1], b.feedback); return { ok: true }; }],
     ['POST', /^\/api\/tasks\/(\d+)\/retry$/, (m) => { engine.retry(m[1]); return { ok: true }; }],
     ['POST', /^\/api\/tasks\/(\d+)\/cancel$/, (m) => { engine.cancel(m[1]); return { ok: true }; }],
-    ['GET', /^\/api\/report$/, () => ({ markdown: engine.report() })],
+    ['GET', /^\/api\/report$/, (_m, _b, url) => ({ markdown: engine.report(reportHours(url.searchParams.get('hours'))) })],
     ['POST', /^\/api\/audit$/, async () => engine.audit()],
   ];
 
