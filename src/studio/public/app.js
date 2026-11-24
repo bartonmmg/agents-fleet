@@ -30,6 +30,7 @@ const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke
 const S = { state: null, selected: null, task: null, activity: [], diff: null, connected: false };
 
 const COLUMNS = [
+  { key: 'proposed', label: 'Propuestas', statuses: ['proposed'], empty: 'Tocá "Proponer mejoras" y el Product Manager sugiere tareas.' },
   { key: 'queued', label: 'En cola', statuses: ['queued'], empty: 'Agregá una tarea para empezar.' },
   { key: 'running', label: 'Trabajando', statuses: ['running', 'merging'], empty: 'Ningún agente trabajando.' },
   { key: 'ready', label: 'Para aprobar', statuses: ['ready_to_merge'], empty: 'Nada para revisar todavía.' },
@@ -37,10 +38,14 @@ const COLUMNS = [
   { key: 'merged', label: 'Integradas', statuses: ['merged'], empty: 'Todavía no se integró nada.' },
 ];
 const STATUS = {
+  proposed: ['Propuesta', 'b-warn'], declined: ['Descartada', 'b-neutral'],
   queued: ['En cola', 'b-neutral'], running: ['Trabajando', 'b-run'], merging: ['Integrando', 'b-run'],
   ready_to_merge: ['Lista para aprobar', 'b-ok'], needs_human: ['Necesita tu ayuda', 'b-bad'],
   merged: ['Integrada', 'b-ok'], cancelled: ['Cancelada', 'b-neutral'],
 };
+const CATEGORY = { bug: 'Bug', test: 'Tests', refactor: 'Refactor', performance: 'Rendimiento', accessibility: 'Accesibilidad', feature: 'Feature', system: 'Sistema' };
+const RISK = { low: ['Riesgo bajo', 'b-ok'], medium: ['Riesgo medio', 'b-warn'], high: ['Riesgo alto', 'b-bad'] };
+const catBadges = (t) => (t.category ? `<span class="tag">${esc(CATEGORY[t.category] || t.category)}</span>` : '') + (t.risk && RISK[t.risk] ? `<span class="badge ${RISK[t.risk][1]}">${RISK[t.risk][0]}</span>` : '');
 const STAGE_LABEL = { plan: 'planifica', execute: 'implementa', check: 'automáticos', verify: 'verifica', review: 'revisa el código' };
 
 // ---------- API ----------
@@ -93,6 +98,10 @@ function connect() {
       renderActivity();
     }
   });
+  es.addEventListener('proposals', (e) => {
+    const r = JSON.parse(e.data);
+    toast(r.message, r.ok ? '' : 'error');
+  });
   es.onerror = () => { S.connected = false; renderTopbar(); };
 }
 
@@ -118,6 +127,9 @@ function renderTopbar() {
       <span class="pill">${working} trabajando · máx. ${st.config.maxConcurrent}</span>
       <span class="pill" title="Ejecuciones de agentes hoy. Usa tu plan de Claude, sin costo extra.">Plan: ${st.runsToday} / ${st.config.maxAgentRunsPerDay} hoy</span>
       <span class="spacer"></span>
+      ${st.proposing
+    ? '<button disabled><span class="pulse"></span> Product Manager pensando…</button>'
+    : `<button data-action="propose" title="El Product Manager analiza el proyecto y sugiere tareas">${icon('spark')} Proponer mejoras</button>`}
       <button data-action="new-task">${icon('plus')} Nueva tarea</button>
       ${live
     ? `<button data-action="pause">${icon('pause')} Pausar</button>`
@@ -176,7 +188,7 @@ function cardHtml(t) {
   else if (t.status === 'queued' && t.feedback) badge = `<span class="badge b-warn">${icon('refresh')} Con correcciones</span>`;
   return `<div class="card ${t.priority === 1 ? 'prio-1' : ''} ${S.selected === t.id ? 'selected' : ''}" tabindex="0" data-task="${t.id}">
     <div class="title">${esc(t.title)}</div>
-    <div class="meta">${t.area ? `<span class="tag">${esc(t.area)}</span>` : ''}<span>#${t.id}</span>${badge}</div>
+    <div class="meta">${catBadges(t)}${t.area ? `<span class="tag">${esc(t.area)}</span>` : ''}<span>#${t.id}</span>${badge}</div>
   </div>`;
 }
 
@@ -185,12 +197,14 @@ function renderBoard() {
   const tasks = st.tasks;
   const hasQueued = tasks.some((t) => t.status === 'queued');
   let hint = '';
-  if (!tasks.length) hint = `<div class="hint-bar">${icon('plus')} Empezá cargando una tarea chica y concreta. <button data-action="new-task">Nueva tarea</button></div>`;
-  else if (hasQueued && !st.running) hint = `<div class="hint-bar">${icon('play')} Hay tareas en cola. Tocá <b>Iniciar</b> y los agentes empiezan a trabajar. <button class="primary" data-action="start">Iniciar</button></div>`;
+  if (st.productFile && !st.productFile.exists) hint += `<div class="hint-bar">${icon('file')} Falta la <b>brújula del producto</b> (${esc(st.productFile.path)}): le dice al Product Manager qué es la app, qué priorizar y qué no tocar. <button data-action="product-file">Crear PRODUCT.md</button></div>`;
+  if (!tasks.length) hint += `<div class="hint-bar">${icon('plus')} Empezá cargando una tarea chica y concreta. <button data-action="new-task">Nueva tarea</button></div>`;
+  else if (hasQueued && !st.running) hint += `<div class="hint-bar">${icon('play')} Hay tareas en cola. Tocá <b>Iniciar</b> y los agentes empiezan a trabajar. <button class="primary" data-action="start">Iniciar</button></div>`;
   $('#main').innerHTML = `${hint}<div class="board">${COLUMNS.map((c) => {
     let list = tasks.filter((t) => c.statuses.includes(t.status));
     list = c.key === 'merged' ? list.sort((a, b) => b.id - a.id).slice(0, 15) : list.sort((a, b) => a.priority - b.priority || a.id - b.id);
-    return `<section class="column"><h2>${c.label}<span class="count">${tasks.filter((t) => c.statuses.includes(t.status)).length}</span></h2>
+    const extra = c.key === 'proposed' && list.length > 1 ? `<button class="ghost mini" data-action="accept-all" title="Aprobar todas las propuestas">${icon('check')} Todas</button>` : '';
+    return `<section class="column"><h2>${c.label}<span class="count">${tasks.filter((t) => c.statuses.includes(t.status)).length}</span>${extra}</h2>
       ${list.length ? list.map(cardHtml).join('') : `<div class="empty">${c.empty}</div>`}</section>`;
   }).join('')}</div>`;
 }
@@ -239,6 +253,10 @@ function renderDrawer() {
   const max = S.state?.config?.maxAttempts ?? 2;
   const [label, cls] = STATUS[t.status] || [t.status, 'b-neutral'];
   const actions = [];
+  if (t.status === 'proposed') {
+    actions.push(`<button class="good" data-action="accept">${icon('check')} Aprobar: pasa a la cola</button>`);
+    actions.push(`<button class="danger" data-action="decline">${icon('x')} Descartar</button>`);
+  }
   if (t.status === 'ready_to_merge') {
     actions.push(`<button class="good" data-action="approve">${icon('merge')} Aprobar e integrar</button>`);
     actions.push(`<button data-action="request-changes">${icon('edit')} Pedir cambios</button>`);
@@ -255,21 +273,24 @@ function renderDrawer() {
   $('#drawer').innerHTML = `
     <header>
       <div class="row"><h2>${esc(t.title)}</h2><button class="ghost" data-action="close" aria-label="Cerrar">${icon('x')}</button></div>
-      <div class="sub"><span class="badge ${cls}">${label}</span><span>#${t.id}</span>${t.area ? `<span class="tag">${esc(t.area)}</span>` : ''}
+      <div class="sub"><span class="badge ${cls}">${label}</span>${catBadges(t)}<span>#${t.id}</span>${t.area ? `<span class="tag">${esc(t.area)}</span>` : ''}
         <span>Prioridad ${t.priority === 1 ? 'alta' : t.priority === 3 ? 'baja' : 'normal'}</span><span>Intento ${t.attempts}/${max}</span></div>
       ${actions.length ? `<div class="actions">${actions.join('')}</div>` : ''}
     </header>
+    ${t.rationale ? `<section><h3>${icon('spark')} Por qué lo propone el Product Manager</h3><div class="desc">${esc(t.rationale)}</div></section>` : ''}
+    ${t.status === 'declined' ? `<section><h3>Descartada</h3><div class="desc">${esc(t.declineReason || 'Sin motivo.')}</div></section>` : ''}
     ${t.description ? `<section><h3>Descripción</h3><div class="desc">${esc(t.description)}</div></section>` : ''}
     ${t.status === 'needs_human' && t.error ? `<section><h3>${icon('alert')} Por qué necesita tu ayuda</h3><div class="error-box">${esc(t.error)}</div></section>` : ''}
     ${t.status === 'queued' && t.feedback ? `<section><h3>${icon('edit')} Correcciones pendientes</h3><div class="error-box" style="background:var(--warn-bg);color:var(--warn)">${esc(t.feedback)}</div></section>` : ''}
-    <section><h3>Qué hizo cada agente</h3>
+    ${t.status === 'proposed' ? '<section><div class="hint">Es una propuesta: si la aprobás, pasa a la cola y la toma un Developer.</div></section>' : ''}
+    ${['proposed', 'declined'].includes(t.status) ? '' : `<section><h3>Qué hizo cada agente</h3>
       ${steps.length ? `<ul class="steps">${steps.map((s) => `
         <li class="step"><div class="st ${s.status}">${stepIcon(s.status)}</div><div>
           <div><span class="who">${esc(s.role)}</span> <span class="what">${esc(STAGE_LABEL[s.stage] || s.stage)}${s.status === 'running' ? '…' : ''}</span></div>
           ${s.summary ? `<div class="summary">${esc(s.summary)}</div>` : ''}
         </div></li>`).join('')}</ul>` : `<div class="hint">${t.status === 'queued' ? 'Todavía no empezó. Va a arrancar cuando la flota esté en marcha y haya lugar.' : 'Sin pasos registrados.'}</div>`}
     </section>
-    <section><h3>${running ? '<span class="badge b-run"><span class="pulse"></span>En vivo</span>' : ''} Actividad</h3><div class="activity" id="activity"></div></section>
+    <section><h3>${running ? '<span class="badge b-run"><span class="pulse"></span>En vivo</span>' : ''} Actividad</h3><div class="activity" id="activity"></div></section>`}
     ${t.evidence?.length ? `<section><h3>Evidencia del QA</h3><div class="evidence">${t.evidence.map((f) => {
     const url = `/api/tasks/${t.id}/evidence/${encodeURIComponent(f)}`;
     return /\.(png|jpe?g|gif|webp|svg)$/i.test(f)
@@ -429,6 +450,22 @@ function requestChangesDialog() {
   });
 }
 
+function declineDialog() {
+  const t = S.task;
+  openDialog(`<form>
+    <h2>Descartar propuesta</h2>
+    <p class="intro"><b>${esc(t.title)}</b></p>
+    <label for="f-reason">¿Por qué? (opcional, pero ayuda mucho)</label>
+    <textarea id="f-reason" name="reason" placeholder="No es prioridad ahora: primero quiero cerrar los bugs del carrito."></textarea>
+    <div class="hint">El Product Manager lee estos motivos en las próximas corridas y no vuelve a proponer cosas así.</div>
+    <div class="err"></div>
+    <div class="buttons"><button type="button" data-close>Cancelar</button><button type="submit" class="danger">${icon('x')} Descartar</button></div>
+  </form>`, async (fd) => {
+    await api('POST', `/api/tasks/${t.id}/decline`, { reason: String(fd.get('reason') || '').trim() });
+    toast('Propuesta descartada');
+  });
+}
+
 function settingsDialog() {
   const c = S.state.config;
   const models = ['opus', 'sonnet', 'haiku'];
@@ -458,6 +495,20 @@ function settingsDialog() {
       <div><span class="hint">QA Verifier</span>${sel('m_verify', c.models.verify)}</div>
       <div><span class="hint">Code Reviewer</span>${sel('m_review', c.models.review)}</div>
     </div>
+    <label>Product Manager</label>
+    <div class="grid2">
+      <div><span class="hint">Modelo</span>${sel('m_propose', c.models.propose)}</div>
+      <div><span class="hint">Propuestas por corrida / por día</span><div class="grid2" style="gap:0 6px"><input type="number" name="pRun" min="1" max="20" step="1" value="${c.product.maxProposalsPerRun}"><input type="number" name="pDay" min="1" max="100" step="1" value="${c.product.maxProposalsPerDay}"></div></div>
+    </div>
+    <label>Brújula del producto</label>
+    <input name="productFile" value="${esc(c.product.file)}" placeholder="PRODUCT.md">
+    <label>Señales que lee el Product Manager</label>
+    <label style="display:flex;gap:8px;align-items:center;margin:4px 0;color:var(--text)"><input type="checkbox" name="sigGithub" style="width:auto" ${c.signals.github ? 'checked' : ''}> Issues abiertos de GitHub</label>
+    <div class="grid2">
+      <div><span class="hint">Errores de la app (archivo o carpeta)</span><input name="sigErrors" value="${esc(c.signals.errorsPath)}" placeholder="logs/errores.log"></div>
+      <div><span class="hint">Feedback de usuarios (archivo o carpeta)</span><input name="sigFeedback" value="${esc(c.signals.feedbackPath)}" placeholder="feedback/"></div>
+    </div>
+    <div class="hint">Rutas relativas a la carpeta del proyecto. Vacío: no se lee.</div>
     <label>Identidad de los commits de los agentes</label>
     <div class="grid2">
       <input name="gitName" value="${esc(c.gitAuthor?.name)}" placeholder="Nombre">
@@ -476,7 +527,9 @@ function settingsDialog() {
       maxAttempts: Number(fd.get('maxAttempts')),
       checkCommand: String(fd.get('checkCommand') || '').trim(),
       maxAgentRunsPerDay: Number(fd.get('maxAgentRunsPerDay')),
-      models: { plan: fd.get('m_plan'), execute: fd.get('m_execute'), verify: fd.get('m_verify'), review: fd.get('m_review') },
+      models: { plan: fd.get('m_plan'), execute: fd.get('m_execute'), verify: fd.get('m_verify'), review: fd.get('m_review'), propose: fd.get('m_propose') },
+      product: { file: String(fd.get('productFile') || '').trim() || 'PRODUCT.md', maxProposalsPerRun: Math.max(1, Math.round(Number(fd.get('pRun')) || 5)), maxProposalsPerDay: Math.max(1, Math.round(Number(fd.get('pDay')) || 15)) },
+      signals: { github: fd.get('sigGithub') === 'on', errorsPath: String(fd.get('sigErrors') || '').trim(), feedbackPath: String(fd.get('sigFeedback') || '').trim() },
       gitAuthor: { name: gitName, email: gitEmail },
     });
     toast('Configuración guardada');
@@ -605,6 +658,19 @@ document.addEventListener('click', async (e) => {
   const t = S.task;
   switch (a) {
     case 'new-task': return newTaskDialog();
+    case 'propose': return act(() => api('POST', '/api/propose'), 'El Product Manager está analizando el proyecto…');
+    case 'accept': return act(() => api('POST', '/api/proposals/accept', { ids: [t.id] }), 'Aprobada: pasa a la cola');
+    case 'accept-all': {
+      const n = S.state.tasks.filter((x) => x.status === 'proposed').length;
+      if (!window.confirm(`¿Aprobar las ${n} propuestas? Pasan todas a la cola.`)) return;
+      return act(() => api('POST', '/api/proposals/accept', { all: true }), `${n} propuestas aprobadas`);
+    }
+    case 'decline': return declineDialog();
+    case 'product-file': {
+      const r = await act(() => api('POST', '/api/product-file'));
+      if (r) toast(r.created ? `Creado ${r.file}. Completalo con tus palabras.` : `Ya existe: ${r.file}`);
+      return;
+    }
     case 'start': return act(() => api('POST', '/api/run/start'), 'Flota en marcha');
     case 'pause': return act(() => api('POST', '/api/run/pause'), 'Pausando: los agentes terminan el paso actual');
     case 'settings': return settingsDialog();

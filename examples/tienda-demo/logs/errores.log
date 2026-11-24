@@ -1,0 +1,7 @@
+2026-11-19T14:02:11Z ERROR TypeError: Cannot read properties of undefined (reading 'price')
+    at addItem (src/cart.mjs:9)
+    contexto: addItem(cart, undefined, 1) desde la pantalla de búsqueda cuando el producto no existe
+2026-11-21T09:47:30Z ERROR RangeError: toFixed() digits argument must be between 0 and 100
+    at formatPrice (src/format.mjs:2)
+    contexto: formatPrice("1500") recibió un string desde el formulario de precios
+2026-11-22T18:15:03Z WARN total() devolvió un número negativo (-20) con discountPercent=120

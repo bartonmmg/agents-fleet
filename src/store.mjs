@@ -5,11 +5,12 @@ import { now, today, writeAtomic } from './util.mjs';
 
 /**
  * Estados de una tarea:
+ *   proposed (sugerida por el Product Manager) → queued al aprobarla | declined al descartarla
  *   queued → running → ready_to_merge → merging → merged
  *                    ↘ needs_human (agotó intentos o necesita decisión)
  *   cancelled (manual)
  */
-export const STATUSES = ['queued', 'running', 'ready_to_merge', 'merging', 'merged', 'needs_human', 'cancelled'];
+export const STATUSES = ['proposed', 'declined', 'queued', 'running', 'ready_to_merge', 'merging', 'merged', 'needs_human', 'cancelled'];
 
 export class Store {
   constructor(repo) {
@@ -59,7 +60,7 @@ export class Store {
     return task;
   }
 
-  add({ title, description = '', area = null, priority = 2, source = 'manual', sourceKey = null }) {
+  add({ title, description = '', area = null, priority = 2, source = 'manual', sourceKey = null, status = 'queued', category = null, risk = null, rationale = null, acceptance = null }) {
     const data = this.load();
     if (sourceKey && data.tasks.some((t) => t.sourceKey === sourceKey)) return null;
     const task = {
@@ -68,7 +69,11 @@ export class Store {
       description,
       area,
       priority: Number(priority) || 2,
-      status: 'queued',
+      status,
+      category,
+      risk,
+      rationale,
+      acceptance,
       stage: null,
       attempts: 0,
       plan: null,
@@ -82,7 +87,7 @@ export class Store {
       sourceKey,
       createdAt: now(),
       updatedAt: now(),
-      history: [{ at: now(), msg: 'creada' }],
+      history: [{ at: now(), msg: status === 'proposed' ? 'propuesta por el Product Manager' : 'creada' }],
     };
     data.tasks.push(task);
     this.save(data);

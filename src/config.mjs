@@ -21,6 +21,9 @@ export const DEFAULTS = {
   // Si el plan llega a su límite de uso: en --watch se espera y se reintenta; si no, la flota se detiene.
   limitPauseMin: 30,
   pollSeconds: 60,
+  // Fase 1 de Autopilot: el Product Manager propone tareas a partir de la brújula y las señales.
+  product: { file: 'PRODUCT.md', maxProposalsPerRun: 5, maxProposalsPerDay: 15 },
+  signals: { github: false, errorsPath: '', feedbackPath: '' },
   claudeCommand: 'claude',
   // Identidad con la que se firman los commits de los agentes en ESTE proyecto.
   // Si está vacía se usa la identidad local/global de git del proyecto.
@@ -32,6 +35,7 @@ export const DEFAULTS = {
     verify: 'sonnet',
     review: 'sonnet',
     audit: 'sonnet',
+    propose: 'opus',
   },
   maxTurns: {
     plan: 25,
@@ -39,6 +43,7 @@ export const DEFAULTS = {
     verify: 50,
     review: 30,
     audit: 50,
+    propose: 40,
   },
   allowedTools: [
     'Read', 'Edit', 'Write', 'Glob', 'Grep', 'TodoWrite',
@@ -64,6 +69,8 @@ export function loadConfig(repo) {
     models: { ...DEFAULTS.models, ...(user.models || {}) },
     maxTurns: { ...DEFAULTS.maxTurns, ...(user.maxTurns || {}) },
     gitAuthor: { ...DEFAULTS.gitAuthor, ...(user.gitAuthor || {}) },
+    product: { ...DEFAULTS.product, ...(user.product || {}) },
+    signals: { ...DEFAULTS.signals, ...(user.signals || {}) },
     allowedTools: user.allowedTools || DEFAULTS.allowedTools,
   };
 }

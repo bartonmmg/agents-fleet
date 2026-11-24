@@ -12,6 +12,7 @@ export const ROLES = {
   verify: { name: 'QA Verifier', file: 'qa-verifier' },
   review: { name: 'Code Reviewer', file: 'code-reviewer' },
   audit: { name: 'Auditor de calidad', file: 'quality-auditor' },
+  propose: { name: 'Product Manager', file: 'product-manager' },
 };
 
 /** Enfoques del Code Reviewer. `id` sin acentos para nombres de archivo de log. */

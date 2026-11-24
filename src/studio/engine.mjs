@@ -11,6 +11,7 @@ import { branchDiff, hasCommits, isGitRepo, localIdentity, removeWorktree, repoR
 import { buildReport } from '../report.mjs';
 import { runAudit } from '../audit.mjs';
 import { log, writeAtomic } from '../util.mjs';
+import { acceptProposals, createProductFile, declineProposal, productFilePath, proposalsToday, runProposals } from '../propose.mjs';
 
 /** Permite despertar al loop del scheduler (nueva tarea, pausa) sin esperar el polling. */
 export class Notifier {
@@ -19,7 +20,8 @@ export class Notifier {
   notify() { const w = this.waiters; this.waiters = []; w.forEach((r) => r()); }
 }
 
-const EDITABLE = ['mode', 'maxConcurrent', 'maxAttempts', 'checkCommand', 'maxAgentRunsPerDay', 'limitPauseMin', 'models', 'gitAuthor', 'stageTimeoutMin'];
+const EDITABLE = ['mode', 'maxConcurrent', 'maxAttempts', 'checkCommand', 'maxAgentRunsPerDay', 'limitPauseMin', 'models', 'gitAuthor', 'stageTimeoutMin', 'product', 'signals'];
+const NESTED = ['models', 'gitAuthor', 'product', 'signals'];
 
 /**
  * Motor de Fleet Studio: un proyecto abierto a la vez, la flota corriendo en segundo plano
@@ -31,6 +33,7 @@ export class Engine extends EventEmitter {
     this.home = home;
     this.ctx = null;
     this.running = null;
+    this.proposing = null;
     this.wakeup = new Notifier();
     this.recentFile = path.join(home, 'projects.json');
   }
@@ -49,7 +52,7 @@ export class Engine extends EventEmitter {
 
   /** Abre un proyecto. Si no está preparado para Fleet devuelve lo necesario para el asistente. */
   open(dir) {
-    if (this.running) throw new Error('Pausá la flota antes de cambiar de proyecto.');
+    if (this.running || this.proposing) throw new Error('Pausá la flota (y esperá al Product Manager) antes de cambiar de proyecto.');
     if (!dir || !fs.existsSync(dir)) throw new Error('Esa carpeta no existe.');
     if (!isGitRepo(dir)) throw new Error('Esa carpeta no es un repositorio git. Fleet trabaja sobre proyectos con git.');
     const repo = repoRoot(dir);
@@ -94,7 +97,7 @@ export class Engine extends EventEmitter {
     for (const key of EDITABLE) {
       if (!(key in patch)) continue;
       const v = patch[key];
-      raw[key] = (key === 'models' || key === 'gitAuthor') ? { ...(raw[key] || {}), ...v } : v;
+      raw[key] = NESTED.includes(key) ? { ...(raw[key] || {}), ...v } : v;
     }
     for (const k of ['maxConcurrent', 'maxAttempts', 'maxAgentRunsPerDay', 'limitPauseMin', 'stageTimeoutMin']) {
       if (k in raw) raw[k] = Math.max(1, Math.round(Number(raw[k]) || 1));
@@ -126,6 +129,40 @@ export class Engine extends EventEmitter {
     fs.writeFileSync(stopFile(repo), new Date().toISOString());
     this.wakeup.notify();
     this.emit('state');
+  }
+
+  // ---------- propuestas (Autopilot fase 1) ----------
+
+  /** Lanza al Product Manager en segundo plano; el resultado llega como evento 'proposals'. */
+  propose({ max } = {}) {
+    const ctx = this.requireProject();
+    if (this.proposing) throw new Error('El Product Manager ya está analizando el proyecto.');
+    this.proposing = runProposals(ctx, { max })
+      .then((r) => this.emit('proposals', { ok: r.ok, message: r.message, added: r.added.map((t) => t.id) }))
+      .catch((e) => this.emit('proposals', { ok: false, message: e.message, added: [] }))
+      .finally(() => { this.proposing = null; this.emit('state'); });
+    this.emit('state');
+    return { started: true };
+  }
+
+  acceptProposals(ids) {
+    const { store } = this.requireProject();
+    const list = ids === 'all' ? store.all().filter((t) => t.status === 'proposed').map((t) => t.id) : [].concat(ids).map(Number);
+    const accepted = acceptProposals(store, list);
+    this.wakeup.notify();
+    return { accepted: accepted.length };
+  }
+
+  declineProposal(id, reason) {
+    declineProposal(this.requireProject().store, id, reason);
+    return { ok: true };
+  }
+
+  createProductFile() {
+    const { repo, cfg } = this.requireProject();
+    const r = createProductFile(repo, cfg);
+    this.emit('state');
+    return r;
   }
 
   // ---------- tareas ----------
@@ -215,11 +252,15 @@ export class Engine extends EventEmitter {
       running: Boolean(this.running),
       stopped: fs.existsSync(stopFile(repo)),
       runsToday: store.runsToday(),
+      proposing: Boolean(this.proposing),
+      proposalsToday: proposalsToday(store),
+      productFile: { path: cfg.product.file, exists: fs.existsSync(productFilePath(repo, cfg)) },
       config: {
         mode: cfg.mode, maxConcurrent: cfg.maxConcurrent, maxAttempts: cfg.maxAttempts,
         checkCommand: cfg.checkCommand, maxAgentRunsPerDay: cfg.maxAgentRunsPerDay,
         limitPauseMin: cfg.limitPauseMin, stageTimeoutMin: cfg.stageTimeoutMin,
         models: cfg.models, gitAuthor: cfg.gitAuthor, baseBranch: cfg.baseBranch, planOnly: cfg.planOnly !== false,
+        product: cfg.product, signals: cfg.signals,
       },
       tasks: store.all().map(({ plan, history, ...t }) => ({ ...t, hasPlan: Boolean(plan), lastEvent: history?.at(-1) || null })),
       recent: this.recentProjects(),

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { initRepo } from '../init.mjs';
+import { readRawConfig, saveConfig } from '../config.mjs';
 import { Store } from '../store.mjs';
 import { importTodosFile } from '../ingest.mjs';
 
@@ -46,6 +47,8 @@ export function createDemo(target) {
   gitDemo(dir, ['add', '-A']);
   gitDemo(dir, ['commit', '-q', '-m', 'Tienda demo: carrito, validación y formato']);
   initRepo(dir, { check: 'npm test', mode: 'supervised', gitAuthor: DEMO_AUTHOR });
+  // Señales de ejemplo para el Product Manager: feedback de clientes y un log de errores.
+  saveConfig(dir, { ...readRawConfig(dir), signals: { github: false, errorsPath: 'logs/errores.log', feedbackPath: 'feedback/' } });
   gitDemo(dir, ['add', '-A']);
   gitDemo(dir, ['commit', '-q', '-m', 'Preparar el proyecto para Fleet']);
   importTodosFile(new Store(dir), path.join(dir, 'todos.md'));

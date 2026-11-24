@@ -18,6 +18,7 @@ function detectCheckCommand(repo) {
 
 /** Copia sin pisar: si el archivo ya existe en el proyecto, se respeta. */
 function copyMissing(src, dest, created) {
+  fs.mkdirSync(dest, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
     const s = path.join(src, entry.name);
     const d = path.join(dest, entry.name);
@@ -61,6 +62,11 @@ export function initRepo(dir, { check, mode, skills = true, gitAuthor } = {}) {
   }
   fs.mkdirSync(fleetDir(repo), { recursive: true });
   const ignored = ensureGitignore(repo, ['.fleet/', '.fleet-evidence/']);
-  if (skills) copyMissing(path.join(TEMPLATES), path.join(repo, '.claude'), created);
+  if (skills) {
+    for (const sub of ['skills', 'agents']) copyMissing(path.join(TEMPLATES, sub), path.join(repo, '.claude', sub), created);
+  }
+  // Brújula del producto para el Product Manager (Autopilot), en la raíz del proyecto.
+  const compass = path.join(repo, 'PRODUCT.md');
+  if (!fs.existsSync(compass)) { fs.copyFileSync(path.join(TEMPLATES, 'PRODUCT.md'), compass); created.push(compass); }
   return { repo, created, ignored };
 }

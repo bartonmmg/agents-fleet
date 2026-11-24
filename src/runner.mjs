@@ -139,7 +139,14 @@ async function runFake({ cwd, stage, taskId, logFile, onEvent }) {
   if (delay) await sleep(delay / 2);
   const fail = process.env.FLEET_FAKE_FAIL === stage;
   let text;
-  if (stage === 'plan') {
+  if (stage === 'propose') {
+    const props = [
+      { title: 'Agregar tests de total() con varios productos y descuento', category: 'test', risk: 'low', priority: 2, area: 'carrito', rationale: 'total() no tiene tests con descuento (simulado)', description: 'Cubrir total() con 2+ productos y 10% de descuento.', acceptance: ['Test nuevo que pasa', 'npm test pasa'], source: 'código' },
+      { title: 'Mostrar mensaje cuando el carrito está vacío', category: 'feature', risk: 'medium', priority: 3, area: 'carrito', rationale: 'Pedido en el feedback (simulado)', description: 'Devolver un mensaje claro cuando no hay productos.', acceptance: ['Mensaje visible con carrito vacío'], source: 'feedback' },
+    ];
+    const fence = '```';
+    text = `Analicé el proyecto (simulado).\n${fence}json\n${JSON.stringify(props)}\n${fence}`;
+  } else if (stage === 'plan') {
     text = `## Objetivo\nPlan simulado para la tarea ${taskId}.\n## Pasos\n1. Crear archivo\n2. Verificar`;
   } else if (stage === 'execute') {
     if (fail) return { ok: false, text: 'fallo simulado en execute', costUsd: 0.01 };

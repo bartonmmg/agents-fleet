@@ -21,6 +21,19 @@ No tiene dependencias: solo Node ≥ 20, git y la CLI `claude` con tu sesión in
 4. Decidí con botones: **Aprobar e integrar**, **Pedir cambios** (le escribís al Developer qué corregir) o **Cancelar**.
 5. Cuando entiendas el flujo, abrí **tu proyecto** con el selector de carpetas. La primera vez, Studio te pide el comando de tests y la **identidad de los commits**, para que los agentes no firmen con la cuenta global de la PC.
 
+### Autopilot, fase 1: el Product Manager propone el trabajo
+- **Brújula (`PRODUCT.md`)**: qué es la app, para quién, prioridades, qué no hacer y zonas sensibles. `fleet init` crea la plantilla y Studio te avisa si falta.
+- **"Proponer mejoras"**: el Product Manager lee la brújula, el código, lo integrado recientemente, los fallos, la última auditoría y las **señales** que configures:
+  - issues de GitHub (con `gh` o la API pública);
+  - un archivo o carpeta de errores de la app;
+  - un archivo o carpeta de feedback de usuarios.
+- Propone tareas chicas, con categoría (bug, test, refactor, rendimiento, accesibilidad, feature, sistema), riesgo, justificación y criterios de aceptación.
+- Las propuestas caen en la columna **Propuestas**. **Aprobar** las pasa a la cola y **Descartar** pide un motivo, que el Product Manager respeta en las próximas corridas.
+- Topes: propuestas por corrida y por día (`product.maxProposalsPerRun`, `product.maxProposalsPerDay`).
+- En la terminal: `fleet propose`, `fleet accept <id>|--all`, `fleet decline <id> --reason "..."`.
+
+Plan completo de Autopilot: [docs/autopilot-plan.md](docs/autopilot-plan.md).
+
 También: `fleet studio` desde una terminal (`--port`, `--no-open`, `--repo <ruta>`).
 
 Seguridad: Studio solo escucha en tu PC (127.0.0.1), rechaza pedidos de otros sitios y exige un token de sesión para cualquier acción.

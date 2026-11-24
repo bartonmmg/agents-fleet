@@ -12,6 +12,7 @@ import { writeReport } from './report.mjs';
 import { startDashboard } from './dashboard.mjs';
 import { importGithub, importTodosFile } from './ingest.mjs';
 import { runAudit } from './audit.mjs';
+import { acceptProposals, declineProposal, runProposals } from './propose.mjs';
 
 const HELP = `fleet — flota de agentes Claude Code (verificación primero, worktrees, review adversarial)
 
@@ -24,6 +25,9 @@ Uso: fleet <comando> [opciones] [--repo <ruta>]   (por defecto, el repo del dire
   init [--check "<cmd>"] [--mode supervised|auto]   Prepara el repo: .fleet/, skills y agentes plantilla
   add "<título>" [--desc ..] [--area ..] [--priority 1|2|3]
   import <todos.md> | --github [--label fleet]       Carga tareas desde un checklist o issues de GitHub
+  propose [--max N]                                  Product Manager: propone tareas (quedan como propuestas)
+  accept <id> | --all                                Aprueba propuestas: pasan a la cola
+  decline <id> [--reason "..."]                      Descarta una propuesta (el motivo se recuerda)
   list [--status <estado>]                           Lista tareas
   show <id>                                          Detalle, veredictos e historial
   run [--once] [--watch] [--max N]                   Lanza la flota (watch = modo nocturno)
@@ -48,7 +52,7 @@ export async function main(argv) {
       status: { type: 'string' }, once: { type: 'boolean' }, watch: { type: 'boolean' },
       max: { type: 'string' }, all: { type: 'boolean' }, hours: { type: 'string' },
       days: { type: 'string' }, port: { type: 'string' }, github: { type: 'boolean' },
-      label: { type: 'string' }, help: { type: 'boolean', short: 'h' }, 'no-open': { type: 'boolean' },
+      label: { type: 'string' }, reason: { type: 'string' }, help: { type: 'boolean', short: 'h' }, 'no-open': { type: 'boolean' },
     },
   });
   const [cmd, ...args] = positionals;
@@ -106,6 +110,22 @@ export async function main(argv) {
       console.log(JSON.stringify({ ...t, plan: t.plan ? `${t.plan.slice(0, 1500)}…` : null }, null, 2));
       break;
     }
+    case 'propose': {
+      const r = await runProposals(ctx, { max: o.max });
+      console.log(r.ok ? `✔ ${r.message}` : `✖ ${r.message}`);
+      r.added.forEach((t) => console.log(`  #${t.id} [${t.category} · riesgo ${t.risk}] ${t.title}`));
+      if (r.added.length) console.log('\nAprobá con: fleet accept <id>  (o --all)  ·  descartá con: fleet decline <id> --reason "..."');
+      break;
+    }
+    case 'accept': {
+      const ids = o.all ? store.all().filter((t) => t.status === 'proposed').map((t) => t.id) : args.map(Number);
+      console.log(`✔ ${acceptProposals(store, ids).length} propuestas aprobadas`);
+      break;
+    }
+    case 'decline':
+      declineProposal(store, args[0], o.reason);
+      console.log(`✔ #${args[0]} descartada`);
+      break;
     case 'run':
       if (cfg.planOnly !== false && (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN)) {
         console.log('ℹ Hay una API key en el entorno: Fleet NO la pasa a los agentes (planOnly). Se usará tu login del plan.');

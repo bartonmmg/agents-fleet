@@ -67,6 +67,7 @@ export function createStudioServer({ engine, fleetRoot, token = crypto.randomByt
   };
   engine.on('state', () => broadcast('state', engine.state()));
   engine.on('activity', (e) => broadcast('activity', e));
+  engine.on('proposals', (r) => broadcast('proposals', r));
 
   const indexHtml = () => fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8').replace('__FLEET_TOKEN__', token);
 
@@ -83,6 +84,10 @@ export function createStudioServer({ engine, fleetRoot, token = crypto.randomByt
     ['POST', /^\/api\/run\/start$/, () => { engine.start(); return { ok: true }; }],
     ['POST', /^\/api\/run\/pause$/, () => { engine.pause(); return { ok: true }; }],
     ['POST', /^\/api\/tasks$/, (_m, b) => engine.addTask(b)],
+    ['POST', /^\/api\/propose$/, (_m, b) => engine.propose(b)],
+    ['POST', /^\/api\/proposals\/accept$/, (_m, b) => engine.acceptProposals(b.all ? 'all' : b.ids || [])],
+    ['POST', /^\/api\/tasks\/(\d+)\/decline$/, (m, b) => engine.declineProposal(m[1], b.reason)],
+    ['POST', /^\/api\/product-file$/, () => engine.createProductFile()],
     ['GET', /^\/api\/tasks\/(\d+)$/, (m) => ({ ...engine.task(m[1]), evidence: engine.evidence(m[1]) })],
     ['GET', /^\/api\/tasks\/(\d+)\/diff$/, (m) => ({ diff: engine.diff(m[1]) })],
     ['GET', /^\/api\/tasks\/(\d+)\/activity$/, (m) => engine.activity(m[1])],
