@@ -65,6 +65,11 @@ await runProposals(ctx);
 const help = ctx.store.all().find((t) => t.status === 'ready_to_merge');
 if (help) ctx.store.update(help.id, { status: 'needs_human', error: 'El QA Verifier RECHAZÓ el trabajo: el total con descuento sigue dando 81 (simulado).' }, 'necesita revisión humana');
 ctx.store.add({ title: 'Agregar envío gratis desde $50.000', area: 'carrito', category: 'feature', risk: 'medium' });
+// Una noche de Autopilot reciente: una de las integradas entró sola por la política.
+const merged = ctx.store.all().filter((t) => t.status === 'merged');
+if (merged[0]) ctx.store.update(merged[0].id, { mergedBy: 'autopilot', mergeDecision: { auto: true, reason: 'Bug de riesgo medio: la política permite integrarlo solo.' } });
+const hoursAgo = (h) => new Date(Date.now() - h * 3600_000).toISOString();
+fs.writeFileSync(path.join(repo, '.fleet', 'autopilot.json'), JSON.stringify({ nights: [{ startedAt: hoursAgo(7), endedAt: hoursAgo(1), proposed: 2, autoAccepted: 1, notes: [] }] }));
 
 // 2. Servidor
 const server = createStudioServer({ engine, fleetRoot: tmp });

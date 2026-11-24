@@ -5,3 +5,4 @@ node_modules/
 .studio/
 playground/
 !examples/**/*.log
+.fleet-evidence/

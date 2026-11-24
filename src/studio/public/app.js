@@ -23,11 +23,21 @@ const ICONS = {
   spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/>',
   report: '<path d="M4 19V5M4 19h16M8 15v-4M12 15V8M16 15v-6"/>',
   pause2: '<circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/>',
+  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
 };
 const icon = (name) => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
 
 // ---------- estado ----------
 const S = { state: null, selected: null, task: null, activity: [], diff: null, connected: false };
+
+// localStorage puede no estar disponible (modo privado, datos bloqueados): todo con try/catch.
+// Si no hay, se recuerda en memoria hasta recargar la página.
+const memory = {};
+const store = {
+  get(k) { try { return localStorage.getItem(k) ?? memory[k] ?? null; } catch { return memory[k] ?? null; } },
+  set(k, v) { memory[k] = v; try { localStorage.setItem(k, v); } catch { /* queda en memoria */ } },
+};
 
 const COLUMNS = [
   { key: 'proposed', label: 'Propuestas', statuses: ['proposed'], empty: 'Tocá "Proponer mejoras" y el Product Manager sugiere tareas.' },
@@ -198,6 +208,80 @@ function cardHtml(t) {
   </div>`;
 }
 
+// ---------- resumen "Mientras dormías" ----------
+const DAY_MS = 24 * 3600_000;
+const visitKey = () => `fleet.ultimaVisita:${S.state?.project?.repo || ''}`;
+const hhmm = (iso) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+const sinceLabel = (ms) => (new Date(ms).toDateString() === new Date().toDateString()
+  ? `las ${hhmm(ms)}`
+  : `el ${new Date(ms).toLocaleDateString('es', { day: 'numeric', month: 'long' })} a las ${hhmm(ms)}`);
+
+/** Qué pasó desde que cerraste el resumen por última vez (o en las últimas 24 h si nunca lo cerraste). */
+function recapData() {
+  const st = S.state;
+  const saved = Date.parse(store.get(visitKey()) || '');
+  const since = Number.isFinite(saved) ? saved : Date.now() - DAY_MS;
+  const after = (iso) => Boolean(iso) && Date.parse(iso) > since;
+  const tasks = st.tasks;
+  const night = st.autopilot?.lastNight;
+  const nightRecent = night && after(night.startedAt) && Date.now() - Date.parse(night.startedAt) < DAY_MS;
+  const autoMerged = tasks.filter((t) => t.status === 'merged' && t.mergedBy === 'autopilot' && after(t.mergedAt));
+  const merged = tasks.filter((t) => t.status === 'merged' && after(t.mergedAt));
+  const ready = tasks.filter((t) => t.status === 'ready_to_merge');
+  const help = tasks.filter((t) => t.status === 'needs_human');
+  const reverted = tasks.filter((t) => t.reverted && after(t.updatedAt));
+  const proposed = tasks.filter((t) => t.status === 'proposed' && after(t.createdAt));
+  // Solo cuenta lo que hicieron los agentes sin vos: lo que integraste a mano no vuelve a abrir el resumen.
+  const news = autoMerged.length || reverted.length || proposed.length
+    || ready.some((t) => after(t.updatedAt)) || help.some((t) => after(t.updatedAt));
+  return { since: Number.isFinite(saved) ? since : null, night: nightRecent ? night : null, show: Boolean(nightRecent || news), autoMerged, merged, ready, help, reverted, proposed };
+}
+
+function recapHtml() {
+  const st = S.state;
+  const r = recapData();
+  if (!r.show) return '';
+  const title = r.night ? 'Mientras dormías' : 'Desde tu última visita';
+  const sub = r.night
+    ? `Autopilot trabajó de ${hhmm(r.night.startedAt)} a ${r.night.endedAt ? hhmm(r.night.endedAt) : 'ahora (sigue en curso)'}.`
+    : r.since ? `Novedades desde ${sinceLabel(r.since)}.` : 'Novedades de las últimas 24 horas.';
+  const tile = (n, label, col, tone, hint) => `<button type="button" class="recap-stat ${n ? tone : ''}" data-action="goto-column" data-col="${col}" title="${esc(hint)}">
+      <span class="num">${n}</span><span class="lbl">${label}</span></button>`;
+  const used = st.runsToday;
+  const max = st.config.maxAgentRunsPerDay || 1;
+  const pct = Math.min(100, Math.round((used / max) * 100));
+  const manual = r.merged.length - r.autoMerged.length;
+  return `<section class="recap" aria-labelledby="recap-title">
+    <div class="recap-head">
+      <span class="recap-icon">${icon(r.night ? 'moon' : 'sun')}</span>
+      <div class="recap-titles"><h2 id="recap-title">${title}</h2><p>${sub}${manual > 0 ? ` También ${manual === 1 ? 'se integró 1' : `se integraron ${manual}`} a mano.` : ''}</p></div>
+      <button class="ghost" data-action="report" aria-label="Ver informe">${icon('report')}<span class="wide-only">Ver informe</span></button>
+      <button class="ghost icon-btn" data-action="dismiss-recap" aria-label="Cerrar el resumen" title="Cerrar: vuelve cuando haya novedades">${icon('x')}</button>
+    </div>
+    <div class="recap-stats">
+      ${tile(r.autoMerged.length, r.autoMerged.length === 1 ? 'Integrada sola' : 'Integradas solas', 'merged', 'ok', 'Ir a Integradas')}
+      ${tile(r.ready.length, 'Esperan tu OK', 'ready', 'warn', 'Ir a Para aprobar')}
+      ${tile(r.help.length, r.help.length === 1 ? 'Necesita tu ayuda' : 'Necesitan tu ayuda', 'help', 'bad', 'Ir a Necesita tu ayuda')}
+      ${tile(r.reverted.length, r.reverted.length === 1 ? 'Revertida' : 'Revertidas', 'help', 'bad', 'Las revertidas quedan en Necesita tu ayuda')}
+      ${tile(r.proposed.length, r.proposed.length === 1 ? 'Propuesta nueva' : 'Propuestas nuevas', 'proposed', 'accent', 'Ir a Propuestas')}
+      <div class="recap-stat plan" title="Ejecuciones de agentes hoy. Usa tu plan de Claude, sin costo extra.">
+        <span class="num">${used}<small> / ${max}</small></span><span class="lbl">Uso del plan hoy</span>
+        <span class="bar ${pct >= 90 ? 'high' : ''}" role="progressbar" aria-label="Uso del plan hoy" aria-valuemin="0" aria-valuemax="${max}" aria-valuenow="${used}"><span style="width:${pct}%"></span></span>
+      </div>
+    </div>
+  </section>`;
+}
+
+function gotoColumn(key) {
+  const col = document.getElementById(`col-${key}`);
+  if (!col) return;
+  col.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  col.classList.remove('flash');
+  void col.offsetWidth; // reinicia la animación
+  col.classList.add('flash');
+  col.querySelector('.card')?.focus({ preventScroll: true });
+}
+
 function renderBoard() {
   const st = S.state;
   const tasks = st.tasks;
@@ -206,11 +290,11 @@ function renderBoard() {
   if (st.productFile && !st.productFile.exists) hint += `<div class="hint-bar">${icon('file')} Falta la <b>brújula del producto</b> (${esc(st.productFile.path)}): le dice al Product Manager qué es la app, qué priorizar y qué no tocar. <button data-action="product-file">Crear PRODUCT.md</button></div>`;
   if (!tasks.length) hint += `<div class="hint-bar">${icon('plus')} Empezá cargando una tarea chica y concreta. <button data-action="new-task">Nueva tarea</button></div>`;
   else if (hasQueued && !st.running) hint += `<div class="hint-bar">${icon('play')} Hay tareas en cola. Tocá <b>Iniciar</b> y los agentes empiezan a trabajar. <button class="primary" data-action="start">Iniciar</button></div>`;
-  $('#main').innerHTML = `${hint}<div class="board">${COLUMNS.map((c) => {
+  $('#main').innerHTML = `${recapHtml()}${hint}<div class="board">${COLUMNS.map((c) => {
     let list = tasks.filter((t) => c.statuses.includes(t.status));
     list = c.key === 'merged' ? list.sort((a, b) => b.id - a.id).slice(0, 15) : list.sort((a, b) => a.priority - b.priority || a.id - b.id);
     const extra = c.key === 'proposed' && list.length > 1 ? `<button class="ghost mini" data-action="accept-all" title="Aprobar todas las propuestas">${icon('check')} Todas</button>` : '';
-    return `<section class="column"><h2>${c.label}<span class="count">${tasks.filter((t) => c.statuses.includes(t.status)).length}</span>${extra}</h2>
+    return `<section class="column" id="col-${c.key}" aria-label="${c.label}"><h2>${c.label}<span class="count">${tasks.filter((t) => c.statuses.includes(t.status)).length}</span>${extra}</h2>
       ${list.length ? list.map(cardHtml).join('') : `<div class="empty">${c.empty}</div>`}</section>`;
   }).join('')}</div>`;
 }
@@ -712,6 +796,10 @@ document.addEventListener('click', async (e) => {
     case 'projects': return projectsDialog();
     case 'report': return reportDialog();
     case 'demo': return createDemo();
+    case 'goto-column': return gotoColumn(el.dataset.col);
+    case 'dismiss-recap':
+      store.set(visitKey(), new Date().toISOString());
+      return renderBoard();
     case 'open-recent': return openProject(el.dataset.path);
     case 'close': return closeTask();
     case 'approve': {
