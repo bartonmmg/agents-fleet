@@ -31,7 +31,9 @@ export function pickNext(tasks, runningIds, capacity) {
  */
 export async function runFleet(ctx, { once = false, watch = false, max } = {}) {
   const { cfg, store, repo } = ctx;
-  const capacity = Number(max) || cfg.maxConcurrent;
+  const capacityOf = () => Number(max) || cfg.maxConcurrent;
+  // ctx.wakeup (opcional): Studio lo usa para despertar el loop al agregar tareas o pausar.
+  const wake = () => ctx.wakeup?.wait();
 
   // Recuperación: tareas que quedaron "running" por un proceso que murió.
   for (const t of store.all().filter((x) => x.status === 'running' || x.status === 'merging')) {
@@ -51,7 +53,7 @@ export async function runFleet(ctx, { once = false, watch = false, max } = {}) {
     for (const t of store.all().filter((x) => x.status === 'ready_to_merge')) enqueueMerge(t.id);
   }
 
-  log(`Fleet en marcha: modo ${cfg.mode}, hasta ${capacity} agentes en paralelo, tope ${cfg.maxAgentRunsPerDay} ejecuciones/día${cfg.planOnly !== false ? ', solo plan (sin API)' : ''}`);
+  log(`Fleet en marcha: modo ${cfg.mode}, hasta ${capacityOf()} agentes en paralelo, tope ${cfg.maxAgentRunsPerDay} ejecuciones/día${cfg.planOnly !== false ? ', solo plan (sin API)' : ''}`);
 
   let pausedUntil = 0;
   for (;;) {
@@ -60,7 +62,7 @@ export async function runFleet(ctx, { once = false, watch = false, max } = {}) {
     const paused = Date.now() < pausedUntil;
 
     if (!halted && !paused && !(once && launchedOnce)) {
-      const picks = pickNext(store.all(), new Set(active.keys()), capacity);
+      const picks = pickNext(store.all(), new Set(active.keys()), capacityOf());
       for (const t of picks) {
         const p = processTask(ctx, t.id)
           .then((status) => { if (status === 'ready_to_merge' && cfg.mode === 'auto') enqueueMerge(t.id); })
@@ -81,12 +83,12 @@ export async function runFleet(ctx, { once = false, watch = false, max } = {}) {
     }
 
     if (active.size) {
-      await Promise.race(active.values());
+      await Promise.race([...active.values(), wake()].filter(Boolean));
       continue;
     }
     if (halted) { log(`Fleet detenida: ${halted}`); break; }
     if (watch && !once) {
-      await sleep(cfg.pollSeconds * 1000);
+      await Promise.race([sleep(cfg.pollSeconds * 1000), wake()].filter(Boolean));
       continue;
     }
     break;

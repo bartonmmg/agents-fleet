@@ -171,3 +171,11 @@ test('límite del plan: la tarea vuelve a la cola, no se marca como fallida', as
   assert.equal(task.status, 'queued');
   assert.match(task.history.at(-1).msg, /límite de uso/);
 });
+
+test('summarizeCheck resume la salida de tests', async () => {
+  const { summarizeCheck } = await import('../src/pipeline.mjs');
+  assert.equal(summarizeCheck('# tests 5\n# pass 5\n# fail 0\n', true), '5 de 5 tests pasaron');
+  assert.match(summarizeCheck('# pass 3\n# fail 2\n', false), /^2 de 5 tests fallaron/);
+  assert.equal(summarizeCheck('Tests:       12 passed, 12 total', true), 'Tests: 12 passed, 12 total');
+  assert.equal(summarizeCheck('todo bien', true), 'El comando de verificación pasó');
+});

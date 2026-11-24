@@ -1,0 +1,9 @@
+{
+  "name": "tienda-demo",
+  "version": "1.0.0",
+  "description": "Proyecto de ejemplo para probar Fleet: un carrito de compras con algunos errores a propósito.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

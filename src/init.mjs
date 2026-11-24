@@ -34,7 +34,9 @@ function ensureGitignore(repo, lines) {
   return missing;
 }
 
-export function initRepo(dir, { check, mode, skills = true } = {}) {
+export { detectCheckCommand };
+
+export function initRepo(dir, { check, mode, skills = true, gitAuthor } = {}) {
   if (!isGitRepo(dir)) throw new Error(`${dir} no es un repositorio git`);
   const repo = repoRoot(dir);
   if (!hasCommits(repo)) throw new Error('El repositorio no tiene commits todavía: hacé un primer commit antes de usar Fleet');
@@ -47,6 +49,7 @@ export function initRepo(dir, { check, mode, skills = true } = {}) {
       maxConcurrent: DEFAULTS.maxConcurrent,
       maxAttempts: DEFAULTS.maxAttempts,
       checkCommand: check ?? detectCheckCommand(repo),
+      gitAuthor: gitAuthor || DEFAULTS.gitAuthor,
       planOnly: DEFAULTS.planOnly,
       maxAgentRunsPerDay: DEFAULTS.maxAgentRunsPerDay,
       limitPauseMin: DEFAULTS.limitPauseMin,

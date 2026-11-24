@@ -22,6 +22,9 @@ export const DEFAULTS = {
   limitPauseMin: 30,
   pollSeconds: 60,
   claudeCommand: 'claude',
+  // Identidad con la que se firman los commits de los agentes en ESTE proyecto.
+  // Si está vacía se usa la identidad local/global de git del proyecto.
+  gitAuthor: { name: '', email: '' },
   permissionMode: 'acceptEdits',
   models: {
     plan: 'opus',
@@ -60,8 +63,32 @@ export function loadConfig(repo) {
     ...user,
     models: { ...DEFAULTS.models, ...(user.models || {}) },
     maxTurns: { ...DEFAULTS.maxTurns, ...(user.maxTurns || {}) },
+    gitAuthor: { ...DEFAULTS.gitAuthor, ...(user.gitAuthor || {}) },
     allowedTools: user.allowedTools || DEFAULTS.allowedTools,
   };
+}
+
+/**
+ * Fija la identidad de git para todos los procesos hijos (git y los agentes) vía variables
+ * de entorno, que tienen prioridad sobre la configuración global de git de la PC.
+ */
+export function applyGitIdentity(cfg, env = process.env) {
+  const keys = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'];
+  keys.forEach((k) => delete env[k]);
+  const { name, email } = cfg.gitAuthor || {};
+  if (name && email) {
+    env.GIT_AUTHOR_NAME = name;
+    env.GIT_COMMITTER_NAME = name;
+    env.GIT_AUTHOR_EMAIL = email;
+    env.GIT_COMMITTER_EMAIL = email;
+    return true;
+  }
+  return false;
+}
+
+/** Lee el archivo de configuración tal cual (sin defaults), para editarlo. */
+export function readRawConfig(repo) {
+  return JSON.parse(fs.readFileSync(configPath(repo), 'utf8'));
 }
 
 export function saveConfig(repo, cfg) {

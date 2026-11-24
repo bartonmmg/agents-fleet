@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { ensureDir, killTree } from './util.mjs';
+import { ensureDir, killTree, sleep } from './util.mjs';
 import { commitAll } from './git.mjs';
 
 /**
@@ -9,15 +9,34 @@ import { commitAll } from './git.mjs';
  * Cada etapa es una sesión nueva con contexto limpio: el verificador nunca "recuerda"
  * haber escrito el código que revisa.
  *
- * Devuelve { ok, text, costUsd, sessionId, turns }.
+ * `onEvent(ev)` recibe la actividad en vivo: { kind: 'tool'|'text'|'info', text }.
+ * Devuelve { ok, limited, text, costUsd, sessionId, turns }.
  */
 export async function runAgent(opts) {
   if (process.env.FLEET_RUNNER === 'fake') return runFake(opts);
   return runClaude(opts);
 }
 
-function runClaude({ cfg, cwd, prompt, model, maxTurns, readOnly = false, logFile }) {
-  const args = ['-p', '--output-format', 'json', '--model', model, '--max-turns', String(maxTurns)];
+/** Resume una llamada a herramienta para mostrarla en la actividad en vivo. */
+export function describeTool(name, input = {}) {
+  const target = input.file_path || input.command || input.pattern || input.path || input.url || input.description || '';
+  const short = String(target).replace(/\s+/g, ' ').slice(0, 160);
+  return short ? `${name}: ${short}` : name;
+}
+
+/** Convierte una línea de `--output-format stream-json` en eventos de actividad. */
+export function streamLineToEvents(msg) {
+  if (msg?.type !== 'assistant') return [];
+  const content = msg.message?.content || [];
+  return content.flatMap((c) => {
+    if (c.type === 'tool_use') return [{ kind: 'tool', text: describeTool(c.name, c.input) }];
+    if (c.type === 'text' && c.text?.trim()) return [{ kind: 'text', text: c.text.trim().slice(0, 400) }];
+    return [];
+  });
+}
+
+function runClaude({ cfg, cwd, prompt, model, maxTurns, readOnly = false, logFile, onEvent }) {
+  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--model', model, '--max-turns', String(maxTurns)];
   if (readOnly) {
     args.push('--permission-mode', 'default', '--disallowedTools', 'Edit', 'Write', 'NotebookEdit');
   } else {
@@ -33,9 +52,27 @@ function runClaude({ cfg, cwd, prompt, model, maxTurns, readOnly = false, logFil
       resolve({ ok: false, text: `No se pudo lanzar "${cfg.claudeCommand}": ${e.message}`, costUsd: 0 });
       return;
     }
-    let stdout = '';
+    let raw = '';
+    let buffer = '';
     let stderr = '';
-    child.stdout.on('data', (d) => { stdout += d.toString(); });
+    let result = null;
+    const handleLine = (line) => {
+      if (!line.trim()) return;
+      let msg;
+      try { msg = JSON.parse(line); } catch { return; }
+      if (msg.type === 'result') result = msg;
+      for (const ev of streamLineToEvents(msg)) {
+        try { onEvent?.(ev); } catch { /* la UI no debe romper al agente */ }
+      }
+    };
+    child.stdout.on('data', (d) => {
+      const s = d.toString();
+      raw += s;
+      buffer += s;
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      lines.forEach(handleLine);
+    });
     child.stderr.on('data', (d) => { stderr += d.toString(); });
     const timer = setTimeout(() => { stderr += '\n[fleet] timeout de etapa'; killTree(child); }, cfg.stageTimeoutMin * 60_000);
     child.on('error', (e) => {
@@ -44,27 +81,26 @@ function runClaude({ cfg, cwd, prompt, model, maxTurns, readOnly = false, logFil
     });
     child.on('close', (code) => {
       clearTimeout(timer);
+      handleLine(buffer);
       if (logFile) {
         ensureDir(path.dirname(logFile));
-        fs.writeFileSync(logFile, `# exit ${code}\n## stdout\n${stdout}\n## stderr\n${stderr}\n`);
+        fs.writeFileSync(logFile, `# exit ${code}\n## stdout (stream-json)\n${raw}\n## stderr\n${stderr}\n`);
       }
-      let parsed = null;
-      try { parsed = JSON.parse(stdout.trim()); } catch { /* salida no JSON */ }
-      if (!parsed) {
-        const text = `Salida inesperada de claude (exit ${code}):\n${stderr || stdout}`.slice(0, 4000);
+      if (!result) {
+        const text = `Salida inesperada de claude (exit ${code}):\n${stderr || raw.slice(-3000)}`.slice(0, 4000);
         resolve({ ok: false, limited: isUsageLimit(text), text, costUsd: 0 });
         return;
       }
-      const ok = code === 0 && !parsed.is_error;
+      const ok = code === 0 && !result.is_error;
       resolve({
         ok,
-        limited: !ok && isUsageLimit(`${parsed.result ?? ''} ${stderr}`),
-        text: parsed.result ?? '',
+        limited: !ok && isUsageLimit(`${result.result ?? ''} ${stderr}`),
+        text: result.result ?? '',
         // Con el plan no se cobra: es el costo EQUIVALENTE que informa Claude Code, solo como referencia.
-        costUsd: Number(parsed.total_cost_usd) || 0,
-        sessionId: parsed.session_id,
-        turns: parsed.num_turns,
-        subtype: parsed.subtype,
+        costUsd: Number(result.total_cost_usd) || 0,
+        sessionId: result.session_id,
+        turns: result.num_turns,
+        subtype: result.subtype,
       });
     });
     child.stdin.write(prompt);
@@ -90,25 +126,32 @@ export function isUsageLimit(text) {
 /**
  * Runner falso para tests y demos sin gastar tokens.
  * FLEET_FAKE_FAIL=verify|review|execute hace fallar esa etapa; FLEET_FAKE_FAIL=limit simula el límite del plan.
+ * FLEET_FAKE_DELAY_MS agrega una pausa por etapa, para ver el movimiento en Studio.
  */
-async function runFake({ cwd, stage, taskId, logFile }) {
+async function runFake({ cwd, stage, taskId, logFile, onEvent }) {
+  const delay = Number(process.env.FLEET_FAKE_DELAY_MS) || 0;
   if (process.env.FLEET_FAKE_FAIL === 'limit') {
     return { ok: false, limited: true, text: 'Claude AI usage limit reached (simulado)', costUsd: 0 };
   }
+  onEvent?.({ kind: 'tool', text: 'Read: README.md' });
+  if (delay) await sleep(delay / 2);
+  onEvent?.({ kind: 'text', text: `Trabajando en la etapa ${stage} (simulado)` });
+  if (delay) await sleep(delay / 2);
   const fail = process.env.FLEET_FAKE_FAIL === stage;
   let text;
   if (stage === 'plan') {
-    text = `Plan falso para la tarea ${taskId}:\n1. Crear archivo\n2. Verificar`;
+    text = `## Objetivo\nPlan simulado para la tarea ${taskId}.\n## Pasos\n1. Crear archivo\n2. Verificar`;
   } else if (stage === 'execute') {
     if (fail) return { ok: false, text: 'fallo simulado en execute', costUsd: 0.01 };
     fs.writeFileSync(path.join(cwd, `fleet-fake-${taskId}.txt`), `trabajo de la tarea ${taskId}\n`);
     commitAll(cwd, `feat: tarea ${taskId} (fake)`);
+    onEvent?.({ kind: 'tool', text: `Bash: git commit -m "feat: tarea ${taskId}"` });
     text = 'Listo. Creé el archivo y lo commiteé.';
   } else if (stage === 'verify' || stage === 'review') {
     const verdict = fail ? 'fail' : 'pass';
     text = `Revisé todo.\n\`\`\`json\n${JSON.stringify({ verdict, evidence: ['fake: check ok'], problems: fail ? ['problema simulado'] : [] })}\n\`\`\``;
   } else {
-    text = `## Reporte falso (${stage})\nSin hallazgos.`;
+    text = `## Reporte simulado (${stage})\nSin hallazgos.`;
   }
   if (logFile) { ensureDir(path.dirname(logFile)); fs.writeFileSync(logFile, text); }
   return { ok: true, text, costUsd: 0.01, sessionId: 'fake', turns: 1 };

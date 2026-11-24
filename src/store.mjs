@@ -26,6 +26,29 @@ export class Store {
 
   save(data) {
     writeAtomic(this.file, `${JSON.stringify(data, null, 2)}\n`);
+    try { this.onChange?.(); } catch { /* un observador roto no debe frenar al motor */ }
+  }
+
+  /** Registra el inicio de un paso visible (un rol trabajando sobre la tarea). */
+  startStep(id, { key, role, stage }) {
+    const data = this.load();
+    const task = data.tasks.find((t) => t.id === Number(id));
+    if (!task) return;
+    task.steps ||= [];
+    task.steps.push({ key, role, stage, status: 'running', summary: '', startedAt: now(), endedAt: null });
+    task.updatedAt = now();
+    this.save(data);
+  }
+
+  /** Cierra el último paso con esa clave: status ok | fail | paused. */
+  finishStep(id, key, { status, summary = '' }) {
+    const data = this.load();
+    const task = data.tasks.find((t) => t.id === Number(id));
+    const step = task?.steps?.findLast((s) => s.key === key);
+    if (!step) return;
+    Object.assign(step, { status, summary: String(summary).slice(0, 1200), endedAt: now() });
+    task.updatedAt = now();
+    this.save(data);
   }
 
   all() { return this.load().tasks; }
@@ -53,6 +76,7 @@ export class Store {
       branch: null,
       worktree: null,
       verdicts: {},
+      steps: [],
       costUsd: 0,
       source,
       sourceKey,

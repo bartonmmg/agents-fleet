@@ -11,6 +11,20 @@ Orquestador para trabajar con muchos agentes de Claude Code en paralelo, siguien
 
 No tiene dependencias: solo Node ≥ 20, git y la CLI `claude` con tu sesión iniciada.
 
+## Fleet Studio: la interfaz visual (recomendado)
+
+**Doble clic en `Fleet Studio.cmd`**: se abre en tu navegador (http://127.0.0.1:4400). No hace falta usar la terminal; dejá abierta la ventana negra mientras lo usás.
+
+1. **Primera vez:** tocá **"Crear demo"**. Se crea una tienda de ejemplo en `playground/tienda-demo` con 4 errores a propósito y sus tareas ya cargadas.
+2. Tocá **Iniciar**. Las tarjetas se mueven solas: *En cola → Trabajando → Para aprobar*.
+3. Tocá una tarjeta para ver **qué hizo cada agente**, la **actividad en vivo** (qué archivo lee, qué comando corre), los **cambios en el código** y la evidencia del QA.
+4. Decidí con botones: **Aprobar e integrar**, **Pedir cambios** (le escribís al Developer qué corregir) o **Cancelar**.
+5. Cuando entiendas el flujo, abrí **tu proyecto** con el selector de carpetas. La primera vez, Studio te pide el comando de tests y la **identidad de los commits**, para que los agentes no firmen con la cuenta global de la PC.
+
+También: `fleet studio` desde una terminal (`--port`, `--no-open`, `--repo <ruta>`).
+
+Seguridad: Studio solo escucha en tu PC (127.0.0.1), rechaza pedidos de otros sitios y exige un token de sesión para cualquier acción.
+
 ## Roles
 
 | Rol | Etapa | Qué hace | Puede editar |
@@ -110,6 +124,7 @@ npm link          # deja disponible el comando `fleet`
 | `models` | opus (plan/execute), sonnet (verify/review/audit) | Con el plan, opus consume la cuota más rápido |
 | `maxTurns`, `stageTimeoutMin` | | Límites por etapa |
 | `permissionMode`, `allowedTools` | `acceptEdits` + git/npm/node | Qué pueden hacer los Developers sin preguntar |
+| `gitAuthor` | vacío | `{ "name", "email" }` con que firman los commits los agentes; tiene prioridad sobre la identidad global de git |
 
 ## Desarrollo
 

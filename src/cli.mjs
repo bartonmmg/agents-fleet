@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { loadConfig, saveConfig } from './config.mjs';
+import { applyGitIdentity, loadConfig, saveConfig } from './config.mjs';
 import { Store } from './store.mjs';
 import { initRepo } from './init.mjs';
 import { runFleet } from './scheduler.mjs';
@@ -20,6 +20,7 @@ Roles: Tech Lead (planifica) → Developer (implementa) → QA Verifier (prueba)
 
 Uso: fleet <comando> [opciones] [--repo <ruta>]   (por defecto, el repo del directorio actual)
 
+  studio [--port 4400] [--no-open] [--repo <ruta>]   Interfaz visual (recomendado). También: doble clic en "Fleet Studio.cmd"
   init [--check "<cmd>"] [--mode supervised|auto]   Prepara el repo: .fleet/, skills y agentes plantilla
   add "<título>" [--desc ..] [--area ..] [--priority 1|2|3]
   import <todos.md> | --github [--label fleet]       Carga tareas desde un checklist o issues de GitHub
@@ -47,13 +48,19 @@ export async function main(argv) {
       status: { type: 'string' }, once: { type: 'boolean' }, watch: { type: 'boolean' },
       max: { type: 'string' }, all: { type: 'boolean' }, hours: { type: 'string' },
       days: { type: 'string' }, port: { type: 'string' }, github: { type: 'boolean' },
-      label: { type: 'string' }, help: { type: 'boolean', short: 'h' },
+      label: { type: 'string' }, help: { type: 'boolean', short: 'h' }, 'no-open': { type: 'boolean' },
     },
   });
   const [cmd, ...args] = positionals;
   if (!cmd || o.help || cmd === 'help') { console.log(HELP); return; }
 
   const startDir = path.resolve(o.repo || process.cwd());
+
+  if (cmd === 'studio') {
+    const { startStudio } = await import('./studio/index.mjs');
+    await startStudio({ port: Number(o.port) || 4400, open: !o['no-open'], project: o.repo ? startDir : undefined });
+    await new Promise(() => {});
+  }
 
   if (cmd === 'init') {
     const { repo, created, ignored } = initRepo(startDir, { check: o.check, mode: o.mode });
@@ -68,6 +75,7 @@ export async function main(argv) {
 
   const repo = repoRoot(startDir);
   const cfg = loadConfig(repo);
+  applyGitIdentity(cfg);
   const store = new Store(repo);
   const ctx = { repo, cfg, store };
 

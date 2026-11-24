@@ -82,3 +82,22 @@ export function diffLines(dir, base) {
 export function diffStat(dir, base) {
   return git(dir, ['diff', '--stat', `${base}...HEAD`]).out;
 }
+
+/** Ej.: "2 files changed, 18 insertions(+), 4 deletions(-)" */
+export function shortStat(dir, base, ref = 'HEAD') {
+  return git(dir, ['diff', '--shortstat', `${base}...${ref}`], { allowFail: true }).out;
+}
+
+/** Diff unificado de una rama contra la base (para el visor de cambios de Studio). */
+export function branchDiff(repo, base, branch) {
+  if (!branchExists(repo, branch)) return '';
+  return git(repo, ['diff', '--no-color', `${base}...${branch}`], { allowFail: true }).out;
+}
+
+/** Identidad local de git configurada en el repo (no la global). */
+export function localIdentity(repo) {
+  return {
+    name: git(repo, ['config', '--local', 'user.name'], { allowFail: true }).out,
+    email: git(repo, ['config', '--local', 'user.email'], { allowFail: true }).out,
+  };
+}
