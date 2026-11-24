@@ -88,6 +88,29 @@ label { display: block; font-size: 12.5px; color: var(--muted); margin: 12px 0 4
 .pulse { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.2s infinite ease-in-out; }
 @keyframes pulse { 50% { opacity: .25; } }
 .prio-1 { border-left: 3px solid var(--bad); }
+/* Resumen "Mientras dormías" */
+.recap { margin: 14px 20px 0; padding: 14px 16px 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+.recap-head { display: flex; align-items: center; gap: 12px; }
+.recap-icon { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--run-bg); color: var(--run); flex: none; }
+.recap-icon .icon { width: 18px; height: 18px; }
+.recap-titles { flex: 1; min-width: 0; }
+.recap-titles h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.recap-titles p { margin: 1px 0 0; font-size: 12.5px; color: var(--muted); }
+.icon-btn { padding: 7px; }
+.recap-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 12px; }
+.recap-stat { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); text-align: left; white-space: normal; color: var(--muted); }
+.recap-stat .num { font-size: 22px; font-weight: 600; line-height: 1.15; color: var(--text); font-variant-numeric: tabular-nums; }
+.recap-stat .num small { font-size: 13px; font-weight: 500; color: var(--muted); }
+.recap-stat .lbl { font-size: 12.5px; }
+.recap-stat.ok .num { color: var(--ok); }
+.recap-stat.warn .num { color: var(--warn); }
+.recap-stat.bad .num { color: var(--bad); }
+.recap-stat.accent .num { color: var(--accent-text); }
+.recap-stat .bar { display: block; width: 100%; height: 6px; margin-top: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.recap-stat .bar span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.recap-stat .bar.high span { background: var(--warn); }
+.column.flash { animation: flash 1.2s ease; }
+@keyframes flash { 0%, 40% { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); } }
 .hint-bar { margin: 14px 20px 0; padding: 10px 14px; border-radius: 12px; background: var(--accent-bg); color: var(--accent-text); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
 /* Panel de detalle */
@@ -174,5 +197,11 @@ dialog .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
   .board { grid-template-columns: repeat(6, minmax(240px, 82vw)); padding: 12px 14px 32px; scroll-snap-type: x mandatory; }
   .column { scroll-snap-align: start; }
   dialog .grid2 { grid-template-columns: 1fr; }
+  .recap { margin: 12px 14px 0; padding: 12px; }
+  .recap-stats { grid-template-columns: 1fr 1fr; }
+  .recap-stat .num { font-size: 20px; }
+  .recap-head { gap: 8px; align-items: flex-start; }
+  .wide-only { display: none; }
 }
+@media (prefers-reduced-motion: reduce) { .column.flash { animation: none; } }
 .column h2 .mini { padding: 2px 8px; font-size: 12px; font-weight: 500; }
