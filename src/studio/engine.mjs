@@ -11,6 +11,7 @@ import { branchDiff, hasCommits, isGitRepo, localIdentity, removeWorktree, repoR
 import { buildReport } from '../report.mjs';
 import { runAudit } from '../audit.mjs';
 import { log, writeAtomic } from '../util.mjs';
+import { computeMetrics } from './metrics.mjs';
 import { endNight, inWindow, parseWindow, readAutopilotState, startNight } from '../autopilot.mjs';
 import { acceptProposals, createProductFile, declineProposal, productFilePath, proposalsToday, runProposals } from '../propose.mjs';
 
@@ -293,6 +294,11 @@ export class Engine extends EventEmitter {
 
   audit(days = 7) { return runAudit(this.requireProject(), days); }
 
+  metrics() {
+    const { cfg, store } = this.requireProject();
+    return computeMetrics(store.all(), { runsToday: store.runsToday(), maxRunsPerDay: cfg.maxAgentRunsPerDay });
+  }
+
   // ---------- estado para la UI ----------
 
   state() {
@@ -314,6 +320,7 @@ export class Engine extends EventEmitter {
         models: cfg.models, gitAuthor: cfg.gitAuthor, baseBranch: cfg.baseBranch, planOnly: cfg.planOnly !== false,
         product: cfg.product, signals: cfg.signals, policy: cfg.policy, schedule: cfg.schedule,
       },
+      metrics: this.metrics(),
       tasks: store.all().map(({ plan, history, ...t }) => ({ ...t, hasPlan: Boolean(plan), lastEvent: history?.at(-1) || null })),
       recent: this.recentProjects(),
     };

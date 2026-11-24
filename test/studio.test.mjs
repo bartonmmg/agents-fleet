@@ -127,6 +127,14 @@ test('flujo completo: demo → iniciar → aprobar desde la API', async () => {
   const author = spawnSync('git', ['log', '-1', '--format=%an <%ae>|%cn <%ce>'], { cwd: engine.ctx.repo, encoding: 'utf8' }).stdout.trim();
   assert.equal(author, `${DEMO_AUTHOR.name} <${DEMO_AUTHOR.email}>|${DEMO_AUTHOR.name} <${DEMO_AUTHOR.email}>`);
 
+  // Métricas: la integración recién aprobada cuenta para hoy
+  const metrics = (await call('GET', '/api/metrics')).data;
+  assert.equal(metrics.mergedToday, 1);
+  assert.equal(metrics.manualMerged7d, 1);
+  assert.equal(metrics.perDay.length, 7);
+  assert.ok(metrics.runsToday > 0);
+  assert.deepEqual((await call('GET', '/api/state')).data.metrics, metrics);
+
   // El diff sigue disponible después de integrar (la rama ya no existe)
   assert.match((await call('GET', '/api/tasks/1/diff')).data.diff, /fleet-fake-1\.txt/);
 

@@ -73,6 +73,7 @@ export function createStudioServer({ engine, fleetRoot, token = crypto.randomByt
 
   const routes = [
     ['GET', /^\/api\/state$/, () => engine.state()],
+    ['GET', /^\/api\/metrics$/, () => engine.metrics()],
     ['GET', /^\/api\/fs$/, (_m, _b, url) => listDirs(url.searchParams.get('path') || '')],
     ['POST', /^\/api\/projects\/open$/, (_m, b) => engine.open(b.path)],
     ['POST', /^\/api\/projects\/init$/, (_m, b) => engine.init(b)],

@@ -137,7 +137,6 @@ function renderTopbar() {
       <span class="pill">${MODE_LABEL[st.config.mode] || 'Supervisado'}</span>
       ${st.config.schedule?.enabled ? `<span class="pill ${st.autopilot?.nightActive ? 'live' : ''}" title="Autopilot nocturno"><span class="dot"></span>${st.autopilot?.nightActive ? 'Autopilot trabajando' : `Autopilot ${esc(st.config.schedule.window)}`}</span>` : ''}
       <span class="pill">${working} trabajando · máx. ${st.config.maxConcurrent}</span>
-      <span class="pill" title="Ejecuciones de agentes hoy. Usa tu plan de Claude, sin costo extra.">Plan: ${st.runsToday} / ${st.config.maxAgentRunsPerDay} hoy</span>
       <span class="spacer"></span>
       ${st.proposing
     ? '<button disabled><span class="pulse"></span> Product Manager pensando…</button>'
@@ -282,6 +281,59 @@ function gotoColumn(key) {
   col.querySelector('.card')?.focus({ preventScroll: true });
 }
 
+// ---------- cabecera de métricas ----------
+const WEEKDAY = ['D', 'L', 'M', 'M', 'J', 'V', 'S'];
+const parseDay = (key) => { const [y, m, d] = key.split('-').map(Number); return new Date(y, m - 1, d); };
+
+/** Barras de integraciones por día (7 días), SVG a mano. */
+function weekChart(perDay) {
+  const max = Math.max(1, ...perDay.map((d) => d.merged));
+  const W = 24; const GAP = 8; const H = 44;
+  const bars = perDay.map((d, i) => {
+    const h = d.merged ? Math.max(4, Math.round((d.merged / max) * H)) : 2;
+    const day = parseDay(d.date);
+    const label = `${day.toLocaleDateString('es', { weekday: 'long', day: 'numeric' })}: ${d.merged} ${d.merged === 1 ? 'integrada' : 'integradas'}`;
+    return `<rect x="${i * (W + GAP) + GAP / 2}" y="${H - h}" width="${W}" height="${h}" rx="3" class="${d.merged ? (i === perDay.length - 1 ? 'today' : 'bar') : 'zero'}"><title>${esc(label)}</title></rect>`;
+  }).join('');
+  const total = perDay.reduce((n, d) => n + d.merged, 0);
+  const width = perDay.length * (W + GAP); // cada día ocupa la misma franja que su etiqueta
+  return `<svg class="week-chart" viewBox="0 0 ${width} ${H}" preserveAspectRatio="none" role="img" aria-label="Integraciones por día, últimos 7 días: ${total} en total">${bars}</svg>
+    <div class="week-days" aria-hidden="true">${perDay.map((d, i) => `<span class="${i === perDay.length - 1 ? 'is-today' : ''}">${WEEKDAY[parseDay(d.date).getDay()]}</span>`).join('')}</div>`;
+}
+
+function metricsHtml() {
+  const m = S.state.metrics;
+  if (!m) return '';
+  const pct = Math.min(100, Math.round((m.runsToday / Math.max(1, m.maxRunsPerDay)) * 100));
+  const autoPct = m.merged7d ? Math.round((m.autoMerged7d / m.merged7d) * 100) : 0;
+  return `<section class="metrics" aria-label="Métricas de la flota">
+    <div class="metric">
+      <span class="lbl">Integradas hoy</span>
+      <span class="num">${m.mergedToday}</span>
+      <span class="sub">${m.merged7d} en 7 días</span>
+    </div>
+    <div class="metric" title="Integradas en 7 días que pasaron QA y revisión sin reintentos ni pedidos de cambios">
+      <span class="lbl">Al primer intento</span>
+      <span class="num">${m.firstTryRate === null ? '—' : `${m.firstTryRate}%`}</span>
+      <span class="sub">${m.merged7d ? `de ${m.merged7d} ${m.merged7d === 1 ? 'integrada' : 'integradas'} en 7 días` : 'Sin integraciones en 7 días'}</span>
+    </div>
+    <div class="metric" title="Integradas en 7 días: solas por la política de Autopilot vs. aprobadas por vos">
+      <span class="lbl">Solas · a mano</span>
+      <span class="num">${m.autoMerged7d}<small> · ${m.manualMerged7d}</small></span>
+      <span class="split" aria-hidden="true"><span style="width:${autoPct}%"></span></span>
+    </div>
+    <div class="metric" title="Ejecuciones de agentes hoy. Usa tu plan de Claude, sin costo extra.">
+      <span class="lbl">Plan hoy</span>
+      <span class="num">${m.runsToday}<small> / ${m.maxRunsPerDay}</small></span>
+      <span class="bar ${pct >= 90 ? 'high' : ''}" role="progressbar" aria-label="Ejecuciones del plan hoy" aria-valuemin="0" aria-valuemax="${m.maxRunsPerDay}" aria-valuenow="${m.runsToday}"><span style="width:${pct}%"></span></span>
+    </div>
+    <div class="metric chart">
+      <span class="lbl">Integraciones · 7 días</span>
+      ${weekChart(m.perDay)}
+    </div>
+  </section>`;
+}
+
 function renderBoard() {
   const st = S.state;
   const tasks = st.tasks;
@@ -290,7 +342,7 @@ function renderBoard() {
   if (st.productFile && !st.productFile.exists) hint += `<div class="hint-bar">${icon('file')} Falta la <b>brújula del producto</b> (${esc(st.productFile.path)}): le dice al Product Manager qué es la app, qué priorizar y qué no tocar. <button data-action="product-file">Crear PRODUCT.md</button></div>`;
   if (!tasks.length) hint += `<div class="hint-bar">${icon('plus')} Empezá cargando una tarea chica y concreta. <button data-action="new-task">Nueva tarea</button></div>`;
   else if (hasQueued && !st.running) hint += `<div class="hint-bar">${icon('play')} Hay tareas en cola. Tocá <b>Iniciar</b> y los agentes empiezan a trabajar. <button class="primary" data-action="start">Iniciar</button></div>`;
-  $('#main').innerHTML = `${recapHtml()}${hint}<div class="board">${COLUMNS.map((c) => {
+  $('#main').innerHTML = `${recapHtml()}${metricsHtml()}${hint}<div class="board">${COLUMNS.map((c) => {
     let list = tasks.filter((t) => c.statuses.includes(t.status));
     list = c.key === 'merged' ? list.sort((a, b) => b.id - a.id).slice(0, 15) : list.sort((a, b) => a.priority - b.priority || a.id - b.id);
     const extra = c.key === 'proposed' && list.length > 1 ? `<button class="ghost mini" data-action="accept-all" title="Aprobar todas las propuestas">${icon('check')} Todas</button>` : '';
