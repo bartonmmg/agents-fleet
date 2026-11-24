@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fleetDir } from './config.mjs';
 import { today, writeAtomic } from './util.mjs';
+import { readAutopilotState } from './autopilot.mjs';
 
 /** Informe "matutino": qué se mergeó, qué espera revisión, qué falló y cuánto costó. */
 export function buildReport(store, hours = 24) {
@@ -17,17 +18,33 @@ export function buildReport(store, hours = 24) {
     return ev?.length ? `\n  - Evidencia: ${ev.slice(0, 3).join(' · ')}` : '';
   };
 
+  const night = readAutopilotState(store.repo).nights?.at(-1);
+  const autoMerged = merged.filter((t) => t.mergedBy === 'autopilot');
+  const reverted = data.tasks.filter((t) => t.reverted && recent(t));
+  const proposedRecently = data.tasks.filter((t) => t.source === 'product' && new Date(t.createdAt).getTime() >= since);
+  const hhmm = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) : '');
+  const nightSection = night && new Date(night.startedAt).getTime() >= since ? `
+## 🌙 Autopilot
+- Ventana: ${hhmm(night.startedAt)} → ${night.endedAt ? hhmm(night.endedAt) : 'en curso'}
+- Product Manager: ${proposedRecently.length} propuestas · aprobadas solas por la política: ${night.autoAccepted}
+- Integradas solas: **${autoMerged.length}** · Esperan tu aprobación: **${by('ready_to_merge').length}** · Revertidas por el control de salud: **${reverted.length}**
+${reverted.map((t) => `- ⟲ #${t.id} ${t.title}`).join('\n')}
+` : '';
+
   return `# Informe Fleet — últimas ${hours} h (${new Date().toLocaleString()})
 
-| Mergeadas | Listas para merge | Necesitan humano | En cola | Ejecuciones de agentes (plan) |
+| Integradas | Listas para aprobar | Necesitan humano | En cola | Ejecuciones de agentes (plan) |
 |---|---|---|---|---|
 | ${merged.length} | ${by('ready_to_merge').length} | ${by('needs_human').length} | ${by('queued').length} | ${runs} |
+${nightSection}
+## ✅ Integradas
+${merged.map((t) => `${line(t)} → \`${(t.mergeCommit || '').slice(0, 8)}\`${t.mergedBy === 'autopilot' ? ' · _sola (Autopilot)_' : ''}${evidence(t)}`).join('\n') || '_Ninguna._'}
 
-## ✅ Mergeadas
-${merged.map((t) => `${line(t)} → \`${(t.mergeCommit || '').slice(0, 8)}\`${evidence(t)}`).join('\n') || '_Ninguna._'}
+## 👀 Esperan tu aprobación
+${by('ready_to_merge').map((t) => `${line(t)}${t.mergeDecision?.reason ? ` · ${t.mergeDecision.reason}` : ''}${evidence(t)}`).join('\n') || '_Ninguna._'}
 
-## 👀 Listas para merge (revisá una muestra y corré \`fleet merge --all\`)
-${by('ready_to_merge').map((t) => `${line(t)} · rama \`${t.branch}\`${evidence(t)}`).join('\n') || '_Ninguna._'}
+## 💡 Propuestas sin decidir
+${by('proposed').map((t) => `${line(t)}${t.category ? ` · ${t.category}` : ''}${t.risk ? `, riesgo ${t.risk}` : ''}`).join('\n') || '_Ninguna._'}
 
 ## ⚠ Necesitan humano
 ${by('needs_human').filter(recent).map((t) => `${line(t)}\n  - ${String(t.error || '').split('\n')[0].slice(0, 300)}`).join('\n') || '_Ninguna._'}

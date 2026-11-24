@@ -22,6 +22,7 @@ Roles: Tech Lead (planifica) → Developer (implementa) → QA Verifier (prueba)
 Uso: fleet <comando> [opciones] [--repo <ruta>]   (por defecto, el repo del directorio actual)
 
   studio [--port 4400] [--no-open] [--repo <ruta>]   Interfaz visual (recomendado). También: doble clic en "Fleet Studio.cmd"
+  autopilot [--repo <ruta>]                          Autopilot nocturno sin interfaz (dejá la terminal abierta)
   init [--check "<cmd>"] [--mode supervised|auto]   Prepara el repo: .fleet/, skills y agentes plantilla
   add "<título>" [--desc ..] [--area ..] [--priority 1|2|3]
   import <todos.md> | --github [--label fleet]       Carga tareas desde un checklist o issues de GitHub
@@ -63,6 +64,19 @@ export async function main(argv) {
   if (cmd === 'studio') {
     const { startStudio } = await import('./studio/index.mjs');
     await startStudio({ port: Number(o.port) || 4400, open: !o['no-open'], project: o.repo ? startDir : undefined });
+    await new Promise(() => {});
+  }
+
+  if (cmd === 'autopilot') {
+    const { Engine } = await import('./studio/engine.mjs');
+    const { FLEET_ROOT } = await import('./studio/index.mjs');
+    const engine = new Engine({ home: path.join(FLEET_ROOT, '.studio') });
+    const r = engine.open(startDir);
+    if (r.needsInit) throw new Error('El proyecto no está preparado: corré `fleet init` o abrilo en Studio.');
+    const { schedule, mode } = engine.ctx.cfg;
+    if (!schedule.enabled) console.log('ℹ El horario nocturno está desactivado: activalo desde Studio (Configuración → Autopilot).');
+    console.log(`Autopilot esperando la ventana ${schedule.window} · modo ${mode}. Dejá esta ventana abierta (Ctrl+C para salir).`);
+    await engine.startAutopilotTimer();
     await new Promise(() => {});
   }
 

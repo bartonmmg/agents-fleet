@@ -7,7 +7,7 @@
     "fleet": "bin/fleet.mjs"
   },
   "scripts": {
-    "test": "node --test --test-concurrency=1 \"test/**/*.test.mjs\"",
+    "test": "node --test --test-concurrency=1 --test-timeout=180000 \"test/**/*.test.mjs\"",
     "check": "npm test"
   },
   "engines": {

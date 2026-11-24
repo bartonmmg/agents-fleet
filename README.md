@@ -32,6 +32,22 @@ No tiene dependencias: solo Node ≥ 20, git y la CLI `claude` con tu sesión in
 - Topes: propuestas por corrida y por día (`product.maxProposalsPerRun`, `product.maxProposalsPerDay`).
 - En la terminal: `fleet propose`, `fleet accept <id>|--all`, `fleet decline <id> --reason "..."`.
 
+### Autopilot, fase 3: trabajo nocturno sin intervención
+- **Modo "Por niveles"** (Configuración → Modo):
+  - Se integran solos los tipos de tarea que elijas (por defecto bugs, tests, refactors, rendimiento y accesibilidad), siempre que el riesgo no sea alto y no toquen **zonas sensibles**.
+  - Features y cambios del sistema **siempre** esperan tu OK.
+  - El motivo de cada decisión queda en la tarea ("Espera tu OK: toca src/auth/…").
+- **Ventana nocturna** (por ejemplo de 01:00 a 07:00). Al abrirse:
+  1. el Product Manager propone;
+  2. las propuestas de bajo riesgo se aprueban solas;
+  3. arranca la flota.
+
+  Al cerrarse, no se lanzan tareas nuevas y las que están en curso terminan.
+- **Control de salud** (opcional, por ejemplo `npm run build`): corre después de cada integración. Si falla, **se revierte solo** con un commit de revert y la tarea queda para vos.
+- **Informe**: la sección 🌙 muestra qué se propuso, qué se integró solo, qué espera tu aprobación y qué se revirtió.
+- Studio tiene que quedar abierto (y la PC encendida) durante la ventana. Sin interfaz: `fleet autopilot --repo <ruta>`.
+- Al crear una tarea a mano podés indicar tipo y riesgo. Las que no tienen tipo siempre esperan tu OK.
+
 Plan completo de Autopilot: [docs/autopilot-plan.md](docs/autopilot-plan.md).
 
 También: `fleet studio` desde una terminal (`--port`, `--no-open`, `--repo <ruta>`).

@@ -5,6 +5,7 @@ import { runAgent } from './runner.mjs';
 import { branchDiff, commitAll, commitsAhead, createWorktree, diffLines, isDirty, shortStat } from './git.mjs';
 import { ROLES, executePrompt, pickReviewFocus, planPrompt, reviewPrompt, verifyPrompt } from './prompts.mjs';
 import { extractJson, log, now, runShell, tail } from './util.mjs';
+import { refreshMergeDecision } from './policy.mjs';
 
 /** Se alcanzó el tope diario de ejecuciones configurado (maxAgentRunsPerDay). */
 export class DailyRunLimit extends Error {}
@@ -158,6 +159,7 @@ export async function processTask(ctx, taskId) {
 
       try { fs.writeFileSync(path.join(runDir, 'changes.diff'), branchDiff(repo, base, branch)); } catch { /* no crítico */ }
       store.update(taskId, { status: 'ready_to_merge', stage: null, feedback: null, error: null }, 'verificada y revisada: lista para integrar');
+      refreshMergeDecision(ctx, taskId);
       log(`#${taskId} ✔ lista para integrar`);
       return 'ready_to_merge';
     }

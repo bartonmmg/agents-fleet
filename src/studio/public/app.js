@@ -46,6 +46,7 @@ const STATUS = {
 const CATEGORY = { bug: 'Bug', test: 'Tests', refactor: 'Refactor', performance: 'Rendimiento', accessibility: 'Accesibilidad', feature: 'Feature', system: 'Sistema' };
 const RISK = { low: ['Riesgo bajo', 'b-ok'], medium: ['Riesgo medio', 'b-warn'], high: ['Riesgo alto', 'b-bad'] };
 const catBadges = (t) => (t.category ? `<span class="tag">${esc(CATEGORY[t.category] || t.category)}</span>` : '') + (t.risk && RISK[t.risk] ? `<span class="badge ${RISK[t.risk][1]}">${RISK[t.risk][0]}</span>` : '');
+const MODE_LABEL = { supervised: 'Supervisado', policy: 'Por niveles', auto: 'Automático total' };
 const STAGE_LABEL = { plan: 'planifica', execute: 'implementa', check: 'automáticos', verify: 'verifica', review: 'revisa el código' };
 
 // ---------- API ----------
@@ -123,7 +124,8 @@ function renderTopbar() {
     html += `
       <button class="ghost project-btn" data-action="projects" title="${esc(p.repo)}">${icon('folder')} ${esc(p.name)}</button>
       <span class="pill ${flota[1]}"><span class="dot"></span>${flota[0]}</span>
-      <span class="pill">${st.config.mode === 'auto' ? 'Automático' : 'Supervisado'}</span>
+      <span class="pill">${MODE_LABEL[st.config.mode] || 'Supervisado'}</span>
+      ${st.config.schedule?.enabled ? `<span class="pill ${st.autopilot?.nightActive ? 'live' : ''}" title="Autopilot nocturno"><span class="dot"></span>${st.autopilot?.nightActive ? 'Autopilot trabajando' : `Autopilot ${esc(st.config.schedule.window)}`}</span>` : ''}
       <span class="pill">${working} trabajando · máx. ${st.config.maxConcurrent}</span>
       <span class="pill" title="Ejecuciones de agentes hoy. Usa tu plan de Claude, sin costo extra.">Plan: ${st.runsToday} / ${st.config.maxAgentRunsPerDay} hoy</span>
       <span class="spacer"></span>
@@ -183,7 +185,11 @@ function cardHtml(t) {
   if (t.status === 'running' && step) badge = `<span class="badge b-run"><span class="pulse"></span>${esc(step.role)} ${esc(STAGE_LABEL[step.stage] || 'trabajando')}</span>`;
   else if (t.status === 'running') badge = '<span class="badge b-run"><span class="pulse"></span>Preparando</span>';
   else if (t.status === 'merging') badge = '<span class="badge b-run"><span class="pulse"></span>Integrando</span>';
-  else if (t.status === 'ready_to_merge') badge = `<span class="badge b-ok">${icon('check')} Verificada y revisada</span>`;
+  else if (t.status === 'ready_to_merge') badge = t.mergeDecision && !t.mergeDecision.auto && S.state?.config?.mode !== 'supervised'
+    ? `<span class="badge b-warn" title="${esc(t.mergeDecision.reason)}">${icon('clock')} Espera tu OK</span>`
+    : `<span class="badge b-ok">${icon('check')} Verificada y revisada</span>`;
+  else if (t.status === 'merged' && t.mergedBy === 'autopilot') badge = `<span class="badge b-ok">${icon('spark')} Integrada sola</span>`;
+  else if (t.reverted) badge = `<span class="badge b-bad">${icon('refresh')} Revertida</span>`;
   else if (t.status === 'needs_human') badge = `<span class="badge b-bad">${icon('alert')} Falló ${t.attempts} ${t.attempts === 1 ? 'vez' : 'veces'}</span>`;
   else if (t.status === 'queued' && t.feedback) badge = `<span class="badge b-warn">${icon('refresh')} Con correcciones</span>`;
   return `<div class="card ${t.priority === 1 ? 'prio-1' : ''} ${S.selected === t.id ? 'selected' : ''}" tabindex="0" data-task="${t.id}">
@@ -277,6 +283,8 @@ function renderDrawer() {
         <span>Prioridad ${t.priority === 1 ? 'alta' : t.priority === 3 ? 'baja' : 'normal'}</span><span>Intento ${t.attempts}/${max}</span></div>
       ${actions.length ? `<div class="actions">${actions.join('')}</div>` : ''}
     </header>
+    ${t.status === 'ready_to_merge' && t.mergeDecision ? `<section><h3>${icon(t.mergeDecision.auto ? 'spark' : 'clock')} Integración</h3><div class="desc">${t.mergeDecision.auto ? 'La política permite integrarla sola: ' : 'Espera tu aprobación. '}${esc(t.mergeDecision.reason)}</div></section>` : ''}
+    ${t.status === 'merged' && t.mergedBy === 'autopilot' ? `<section><h3>${icon('spark')} Integrada sola por Autopilot</h3><div class="desc">${esc(t.mergeDecision?.reason || '')}</div></section>` : ''}
     ${t.rationale ? `<section><h3>${icon('spark')} Por qué lo propone el Product Manager</h3><div class="desc">${esc(t.rationale)}</div></section>` : ''}
     ${t.status === 'declined' ? `<section><h3>Descartada</h3><div class="desc">${esc(t.declineReason || 'Sin motivo.')}</div></section>` : ''}
     ${t.description ? `<section><h3>Descripción</h3><div class="desc">${esc(t.description)}</div></section>` : ''}
@@ -417,6 +425,9 @@ function newTaskDialog() {
       <div><label for="f-area">Área (opcional)</label><input id="f-area" name="area" placeholder="carrito">
         <div class="hint">Dos tareas de la misma área no corren a la vez.</div></div>
       <div><label for="f-prio">Prioridad</label><select id="f-prio" name="priority"><option value="1">Alta</option><option value="2" selected>Normal</option><option value="3">Baja</option></select></div>
+      <div><label for="f-cat">Tipo</label><select id="f-cat" name="category"><option value="">Sin tipo (siempre esperá mi OK)</option>${Object.entries(CATEGORY).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
+      <div><label for="f-risk">Riesgo</label><select id="f-risk" name="risk"><option value="low">Bajo</option><option value="medium" selected>Medio</option><option value="high">Alto</option></select>
+        <div class="hint">En modo Por niveles, Bugs/Tests/Refactors de riesgo bajo o medio se integran solos.</div></div>
     </div>
     <div class="err"></div>
     <div class="buttons"><button type="button" data-close>Cancelar</button><button type="submit" class="primary">${icon('plus')} Agregar a la cola</button></div>
@@ -474,10 +485,11 @@ function settingsDialog() {
     <h2>Configuración del proyecto</h2>
     <label>Modo</label>
     <div class="toggle" id="mode-toggle">
-      <button type="button" data-mode="supervised" class="${c.mode !== 'auto' ? 'on' : ''}">Supervisado</button>
-      <button type="button" data-mode="auto" class="${c.mode === 'auto' ? 'on' : ''}">Automático</button>
+      <button type="button" data-mode="supervised" class="${!['policy', 'auto'].includes(c.mode) ? 'on' : ''}">Supervisado</button>
+      <button type="button" data-mode="policy" class="${c.mode === 'policy' ? 'on' : ''}">Por niveles</button>
+      <button type="button" data-mode="auto" class="${c.mode === 'auto' ? 'on' : ''}">Automático total</button>
     </div>
-    <div class="hint">Supervisado: vos aprobás cada tarea. Automático: se integran solas si pasan todo (para cuando ya confiás en el sistema).</div>
+    <div class="hint">Supervisado: vos aprobás cada integración. <b>Por niveles</b> (Autopilot): se integra solo lo de bajo riesgo según las categorías de abajo; features, riesgo alto y zonas sensibles esperan tu OK. Automático total: todo lo que pase verificación.</div>
     <input type="hidden" name="mode" value="${c.mode}">
     <div class="grid2">
       <div><label>Agentes en paralelo</label><input type="number" name="maxConcurrent" min="1" max="20" step="1" value="${c.maxConcurrent}"></div>
@@ -495,6 +507,22 @@ function settingsDialog() {
       <div><span class="hint">QA Verifier</span>${sel('m_verify', c.models.verify)}</div>
       <div><span class="hint">Code Reviewer</span>${sel('m_review', c.models.review)}</div>
     </div>
+    <label>Autopilot nocturno</label>
+    <label style="display:flex;gap:8px;align-items:center;margin:4px 0;color:var(--text)"><input type="checkbox" name="apEnabled" style="width:auto" ${c.schedule.enabled ? 'checked' : ''}> Trabajar solo en este horario</label>
+    <div class="grid2">
+      <div><span class="hint">Desde</span><input type="time" name="apFrom" value="${esc(c.schedule.window.split('-')[0] || '01:00')}"></div>
+      <div><span class="hint">Hasta</span><input type="time" name="apTo" value="${esc(c.schedule.window.split('-')[1] || '07:00')}"></div>
+    </div>
+    <label style="display:flex;gap:8px;align-items:center;margin:6px 0 2px;color:var(--text)"><input type="checkbox" name="apPropose" style="width:auto" ${c.schedule.autoPropose ? 'checked' : ''}> Al empezar, el Product Manager propone mejoras</label>
+    <label style="display:flex;gap:8px;align-items:center;margin:2px 0;color:var(--text)"><input type="checkbox" name="apAccept" style="width:auto" ${c.policy.autoAcceptProposals ? 'checked' : ''}> Aprobar solas las propuestas de bajo riesgo (según las categorías)</label>
+    <span class="hint">Se integran solas (modo Por niveles)</span>
+    <div style="display:flex;flex-wrap:wrap;gap:4px 14px"><label style="display:flex;gap:6px;align-items:center;margin:2px 0;color:var(--text)"><input type="checkbox" name="cat_bug" style="width:auto" ${c.policy.autoMerge.includes('bug') ? 'checked' : ''}> Bugs</label><label style="display:flex;gap:6px;align-items:center;margin:2px 0;color:var(--text)"><input type="checkbox" name="cat_test" style="width:auto" ${c.policy.autoMerge.includes('test') ? 'checked' : ''}> Tests</label><label style="display:flex;gap:6px;align-items:center;margin:2px 0;color:var(--text)"><input type="checkbox" name="cat_refactor" style="width:auto" ${c.policy.autoMerge.includes('refactor') ? 'checked' : ''}> Refactors</label><label style="display:flex;gap:6px;align-items:center;margin:2px 0;color:var(--text)"><input type="checkbox" name="cat_performance" style="width:auto" ${c.policy.autoMerge.includes('performance') ? 'checked' : ''}> Rendimiento</label><label style="display:flex;gap:6px;align-items:center;margin:2px 0;color:var(--text)"><input type="checkbox" name="cat_accessibility" style="width:auto" ${c.policy.autoMerge.includes('accessibility') ? 'checked' : ''}> Accesibilidad</label></div>
+    <div class="hint">Features y cambios del sistema nunca se integran solos.</div>
+    <label>Zonas sensibles (una por línea; siempre esperan tu OK)</label>
+    <textarea name="apSensitive" style="min-height:60px" placeholder="src/auth/&#10;src/payments/&#10;**/*.sql">${esc((c.policy.sensitivePaths || []).join('\n'))}</textarea>
+    <label>Control de salud después de integrar (opcional)</label>
+    <input name="apHealth" value="${esc(c.policy.healthCommand)}" placeholder="npm run build">
+    <div class="hint">Si falla, el cambio se revierte solo y la tarea queda para vos.</div>
     <label>Product Manager</label>
     <div class="grid2">
       <div><span class="hint">Modelo</span>${sel('m_propose', c.models.propose)}</div>
@@ -529,6 +557,13 @@ function settingsDialog() {
       maxAgentRunsPerDay: Number(fd.get('maxAgentRunsPerDay')),
       models: { plan: fd.get('m_plan'), execute: fd.get('m_execute'), verify: fd.get('m_verify'), review: fd.get('m_review'), propose: fd.get('m_propose') },
       product: { file: String(fd.get('productFile') || '').trim() || 'PRODUCT.md', maxProposalsPerRun: Math.max(1, Math.round(Number(fd.get('pRun')) || 5)), maxProposalsPerDay: Math.max(1, Math.round(Number(fd.get('pDay')) || 15)) },
+      schedule: { enabled: fd.get('apEnabled') === 'on', window: `${fd.get('apFrom') || '01:00'}-${fd.get('apTo') || '07:00'}`, autoPropose: fd.get('apPropose') === 'on' },
+      policy: {
+        autoAcceptProposals: fd.get('apAccept') === 'on',
+        autoMerge: ["bug","test","refactor","performance","accessibility"].filter((k) => fd.get(`cat_${k}`) === 'on'),
+        sensitivePaths: String(fd.get('apSensitive') || '').split('\n').map((x) => x.trim()).filter(Boolean),
+        healthCommand: String(fd.get('apHealth') || '').trim(),
+      },
       signals: { github: fd.get('sigGithub') === 'on', errorsPath: String(fd.get('sigErrors') || '').trim(), feedbackPath: String(fd.get('sigFeedback') || '').trim() },
       gitAuthor: { name: gitName, email: gitEmail },
     });

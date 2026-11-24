@@ -5,7 +5,8 @@ import { writeAtomic } from './util.mjs';
 export const DEFAULTS = {
   baseBranch: 'main',
   // supervised: los PRs quedan en ready_to_merge y vos mergeás con `fleet merge`.
-  // auto: si pasan check + verificación + review, se mergean solos (modo nocturno).
+  // policy: por niveles (Autopilot): se integra solo lo que permite `policy`; lo demás espera.
+  // auto: si pasan check + verificación + review, se integran todos solos.
   mode: 'supervised',
   maxConcurrent: 3,
   maxAttempts: 2,
@@ -24,6 +25,14 @@ export const DEFAULTS = {
   // Fase 1 de Autopilot: el Product Manager propone tareas a partir de la brújula y las señales.
   product: { file: 'PRODUCT.md', maxProposalsPerRun: 5, maxProposalsPerDay: 15 },
   signals: { github: false, errorsPath: '', feedbackPath: '' },
+  // Fase 3: autonomía por niveles (mode: 'policy') y ventana nocturna.
+  policy: {
+    autoMerge: ['bug', 'test', 'refactor', 'performance', 'accessibility'],
+    sensitivePaths: [],
+    healthCommand: '',
+    autoAcceptProposals: true,
+  },
+  schedule: { enabled: false, window: '01:00-07:00', autoPropose: true },
   claudeCommand: 'claude',
   // Identidad con la que se firman los commits de los agentes en ESTE proyecto.
   // Si está vacía se usa la identidad local/global de git del proyecto.
@@ -71,6 +80,8 @@ export function loadConfig(repo) {
     gitAuthor: { ...DEFAULTS.gitAuthor, ...(user.gitAuthor || {}) },
     product: { ...DEFAULTS.product, ...(user.product || {}) },
     signals: { ...DEFAULTS.signals, ...(user.signals || {}) },
+    policy: { ...DEFAULTS.policy, ...(user.policy || {}) },
+    schedule: { ...DEFAULTS.schedule, ...(user.schedule || {}) },
     allowedTools: user.allowedTools || DEFAULTS.allowedTools,
   };
 }

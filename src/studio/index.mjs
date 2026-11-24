@@ -25,6 +25,7 @@ export async function startStudio({ port = 4400, open = true, project, home = pa
     }
   }
   const server = createStudioServer({ engine, fleetRoot: FLEET_ROOT });
+  engine.startAutopilotTimer().catch((e) => console.log(`Autopilot: ${e.message}`));
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, '127.0.0.1', resolve);

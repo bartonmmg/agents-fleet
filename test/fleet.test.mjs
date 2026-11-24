@@ -100,7 +100,7 @@ test('modo auto: tareas en paralelo se verifican y se mergean en main', async ()
   assert.deepEqual(tasks.map((t) => t.status), ['merged', 'merged', 'merged']);
   for (const t of tasks) assert.ok(fs.existsSync(path.join(repo, `fleet-fake-${t.id}.txt`)), `falta el archivo de #${t.id}`);
   assert.equal(sh(repo, 'branch', '--list', 'fleet/*'), '');
-  assert.match(buildReport(ctx.store), /Mergeadas/);
+  assert.match(buildReport(ctx.store), /Integradas/);
 });
 
 test('modo supervisado: queda lista y se mergea con mergeTask', async () => {

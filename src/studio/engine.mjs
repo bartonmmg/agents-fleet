@@ -11,6 +11,7 @@ import { branchDiff, hasCommits, isGitRepo, localIdentity, removeWorktree, repoR
 import { buildReport } from '../report.mjs';
 import { runAudit } from '../audit.mjs';
 import { log, writeAtomic } from '../util.mjs';
+import { endNight, inWindow, parseWindow, readAutopilotState, startNight } from '../autopilot.mjs';
 import { acceptProposals, createProductFile, declineProposal, productFilePath, proposalsToday, runProposals } from '../propose.mjs';
 
 /** Permite despertar al loop del scheduler (nueva tarea, pausa) sin esperar el polling. */
@@ -20,8 +21,8 @@ export class Notifier {
   notify() { const w = this.waiters; this.waiters = []; w.forEach((r) => r()); }
 }
 
-const EDITABLE = ['mode', 'maxConcurrent', 'maxAttempts', 'checkCommand', 'maxAgentRunsPerDay', 'limitPauseMin', 'models', 'gitAuthor', 'stageTimeoutMin', 'product', 'signals'];
-const NESTED = ['models', 'gitAuthor', 'product', 'signals'];
+const EDITABLE = ['mode', 'maxConcurrent', 'maxAttempts', 'checkCommand', 'maxAgentRunsPerDay', 'limitPauseMin', 'models', 'gitAuthor', 'stageTimeoutMin', 'product', 'signals', 'policy', 'schedule'];
+const NESTED = ['models', 'gitAuthor', 'product', 'signals', 'policy', 'schedule'];
 
 /**
  * Motor de Fleet Studio: un proyecto abierto a la vez, la flota corriendo en segundo plano
@@ -34,6 +35,8 @@ export class Engine extends EventEmitter {
     this.ctx = null;
     this.running = null;
     this.proposing = null;
+    this.nightActive = false;
+    this.autopilotTimer = null;
     this.wakeup = new Notifier();
     this.recentFile = path.join(home, 'projects.json');
   }
@@ -102,7 +105,11 @@ export class Engine extends EventEmitter {
     for (const k of ['maxConcurrent', 'maxAttempts', 'maxAgentRunsPerDay', 'limitPauseMin', 'stageTimeoutMin']) {
       if (k in raw) raw[k] = Math.max(1, Math.round(Number(raw[k]) || 1));
     }
-    if (raw.mode !== 'auto') raw.mode = 'supervised';
+    if (!['supervised', 'policy', 'auto'].includes(raw.mode)) raw.mode = 'supervised';
+    if (raw.schedule?.window && !parseWindow(raw.schedule.window)) throw new Error('Horario inválido: usá el formato 01:00-07:00.');
+    if (raw.policy?.sensitivePaths && !Array.isArray(raw.policy.sensitivePaths)) {
+      raw.policy.sensitivePaths = String(raw.policy.sensitivePaths).split('\n').map((x) => x.trim()).filter(Boolean);
+    }
     saveConfig(repo, raw);
     Object.assign(cfg, loadConfig(repo));
     applyGitIdentity(cfg);
@@ -114,6 +121,7 @@ export class Engine extends EventEmitter {
 
   start() {
     const ctx = this.requireProject();
+    ctx.draining = false;
     fs.rmSync(stopFile(ctx.repo), { force: true });
     if (!this.running) {
       this.running = runFleet(ctx, { watch: true })
@@ -129,6 +137,47 @@ export class Engine extends EventEmitter {
     fs.writeFileSync(stopFile(repo), new Date().toISOString());
     this.wakeup.notify();
     this.emit('state');
+  }
+
+  // ---------- Autopilot nocturno (fase 3) ----------
+
+  /** Revisa cada 30 s si hay que abrir o cerrar la ventana nocturna. Lo llaman Studio y `fleet autopilot`. */
+  startAutopilotTimer(intervalMs = 30_000) {
+    clearInterval(this.autopilotTimer);
+    this.autopilotTimer = setInterval(() => this.autopilotTick().catch((e) => log(`Autopilot: ${e.message}`)), intervalMs);
+    this.autopilotTimer.unref?.();
+    return this.autopilotTick();
+  }
+
+  stopAutopilotTimer() { clearInterval(this.autopilotTimer); this.autopilotTimer = null; }
+
+  async autopilotTick(date = new Date()) {
+    if (!this.ctx || this.ticking) return;
+    const { cfg, repo } = this.ctx;
+    const inside = cfg.schedule?.enabled && inWindow(parseWindow(cfg.schedule.window), date);
+    this.ticking = true;
+    try {
+      if (inside && !this.nightActive) {
+        this.nightActive = true;
+        this.ctx.draining = false;
+        this.emit('state');
+        if (!this.proposing) {
+          this.proposing = startNight(this.ctx).finally(() => { this.proposing = null; });
+          const night = await this.proposing;
+          this.emit('proposals', { ok: true, message: `Autopilot: noche iniciada (propuestas: ${night.proposed}, aprobadas por política: ${night.autoAccepted})`, added: [] });
+        }
+        if (fs.existsSync(stopFile(repo))) log('Autopilot: la flota está pausada a mano; no se inicia.');
+        else this.start();
+      } else if (!inside && this.nightActive) {
+        this.nightActive = false;
+        this.ctx.draining = true;
+        endNight(repo);
+        this.wakeup.notify();
+        this.emit('state');
+      }
+    } finally {
+      this.ticking = false;
+    }
   }
 
   // ---------- propuestas (Autopilot fase 1) ----------
@@ -167,10 +216,12 @@ export class Engine extends EventEmitter {
 
   // ---------- tareas ----------
 
-  addTask({ title, description = '', area = '', priority = 2 }) {
+  addTask({ title, description = '', area = '', priority = 2, category = '', risk = '' }) {
+    const cat = ['bug', 'test', 'refactor', 'performance', 'accessibility', 'feature', 'system'].includes(category) ? category : null;
+    const rk = ['low', 'medium', 'high'].includes(risk) ? risk : (cat ? 'medium' : null);
     const { store } = this.requireProject();
     if (!title || !String(title).trim()) throw new Error('La tarea necesita un título.');
-    const t = store.add({ title: String(title).trim(), description: String(description).trim(), area: String(area).trim() || null, priority: Number(priority) || 2 });
+    const t = store.add({ title: String(title).trim(), description: String(description).trim(), area: String(area).trim() || null, priority: Number(priority) || 2, category: cat, risk: rk });
     this.wakeup.notify();
     return t;
   }
@@ -253,6 +304,7 @@ export class Engine extends EventEmitter {
       stopped: fs.existsSync(stopFile(repo)),
       runsToday: store.runsToday(),
       proposing: Boolean(this.proposing),
+      autopilot: { nightActive: this.nightActive, lastNight: readAutopilotState(repo).nights?.at(-1) || null },
       proposalsToday: proposalsToday(store),
       productFile: { path: cfg.product.file, exists: fs.existsSync(productFilePath(repo, cfg)) },
       config: {
@@ -260,7 +312,7 @@ export class Engine extends EventEmitter {
         checkCommand: cfg.checkCommand, maxAgentRunsPerDay: cfg.maxAgentRunsPerDay,
         limitPauseMin: cfg.limitPauseMin, stageTimeoutMin: cfg.stageTimeoutMin,
         models: cfg.models, gitAuthor: cfg.gitAuthor, baseBranch: cfg.baseBranch, planOnly: cfg.planOnly !== false,
-        product: cfg.product, signals: cfg.signals,
+        product: cfg.product, signals: cfg.signals, policy: cfg.policy, schedule: cfg.schedule,
       },
       tasks: store.all().map(({ plan, history, ...t }) => ({ ...t, hasPlan: Boolean(plan), lastEvent: history?.at(-1) || null })),
       recent: this.recentProjects(),

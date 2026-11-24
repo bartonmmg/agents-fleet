@@ -30,7 +30,8 @@ Implementada: `src/propose.mjs`, `src/signals.mjs`, `prompts/product-manager.md`
 - Topes: `maxProposalsPerDay`. Deduplicación contra tareas existentes.
 - Listo cuando: las propuestas son pertinentes y la tasa de descarte baja.
 
-### Fase 3: Autonomía por niveles
+### Fase 3: Autonomía por niveles ✅ (24-11-2026)
+Implementada: `src/policy.mjs` (decisión por modo, categoría, riesgo y zonas sensibles), `src/autopilot.mjs` (ventana horaria, inicio y cierre de la noche), control de salud con revert automático en `src/merge.mjs`, informe con sección 🌙, configuración en Studio y `fleet autopilot` para usarlo sin interfaz. Probada con una noche simulada de punta a punta.
 - `policy.autoMerge`: categorías que se integran solas; `policy.sensitivePaths`: rutas que siempre requieren aprobación.
 - Decisión por tarea al quedar lista: categoría × rutas tocadas → integrar o esperar.
 - `schedule.window` (ej. `01:00-07:00`): el scheduler solo lanza agentes dentro de la ventana; el agente de producto corre al inicio.

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { PlanUsageLimit, isPause, processTask, stopFile } from './pipeline.mjs';
 import { mergeTask } from './merge.mjs';
+import { refreshMergeDecision } from './policy.mjs';
 import { log, sleep } from './util.mjs';
 
 /**
@@ -46,18 +47,22 @@ export async function runFleet(ctx, { once = false, watch = false, max } = {}) {
   let launchedOnce = false;
 
   const enqueueMerge = (id) => {
-    mergeChain = mergeChain.then(() => mergeTask(ctx, id)).catch((e) => log(`#${id} merge: ${e.message}`));
+    mergeChain = mergeChain.then(() => mergeTask(ctx, id, { auto: true })).catch((e) => log(`#${id} merge: ${e.message}`));
+  };
+  // Integra sola una tarea lista solo si la política vigente lo permite (se recalcula con la config actual).
+  const maybeMerge = (id) => {
+    if (cfg.mode === 'supervised') return;
+    try { if (refreshMergeDecision(ctx, id).auto) enqueueMerge(id); } catch (e) { log(`#${id} política: ${e.message}`); }
   };
 
-  if (cfg.mode === 'auto') {
-    for (const t of store.all().filter((x) => x.status === 'ready_to_merge')) enqueueMerge(t.id);
-  }
+  for (const t of store.all().filter((x) => x.status === 'ready_to_merge')) maybeMerge(t.id);
 
   log(`Fleet en marcha: modo ${cfg.mode}, hasta ${capacityOf()} agentes en paralelo, tope ${cfg.maxAgentRunsPerDay} ejecuciones/día${cfg.planOnly !== false ? ', solo plan (sin API)' : ''}`);
 
   let pausedUntil = 0;
   for (;;) {
     if (!halted && fs.existsSync(stopFile(repo))) halted = 'stop solicitado (fleet resume para continuar)';
+    if (!halted && ctx.draining) halted = 'fin de la ventana de Autopilot';
     if (!halted && store.runsToday() >= cfg.maxAgentRunsPerDay) halted = `tope diario de ${cfg.maxAgentRunsPerDay} ejecuciones alcanzado`;
     const paused = Date.now() < pausedUntil;
 
@@ -65,7 +70,7 @@ export async function runFleet(ctx, { once = false, watch = false, max } = {}) {
       const picks = pickNext(store.all(), new Set(active.keys()), capacityOf());
       for (const t of picks) {
         const p = processTask(ctx, t.id)
-          .then((status) => { if (status === 'ready_to_merge' && cfg.mode === 'auto') enqueueMerge(t.id); })
+          .then((status) => { if (status === 'ready_to_merge') maybeMerge(t.id); })
           .catch((e) => {
             if (e instanceof PlanUsageLimit && watch) {
               pausedUntil = Date.now() + cfg.limitPauseMin * 60_000;
