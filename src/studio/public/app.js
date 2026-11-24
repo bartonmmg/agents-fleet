@@ -742,4 +742,9 @@ document.addEventListener('keydown', (e) => {
 });
 $('#scrim').addEventListener('click', closeTask);
 
-connect();
+// ?snapshot=1: carga el estado una sola vez, sin conexión en vivo (para capturas automáticas).
+if (new URLSearchParams(location.search).has('snapshot')) {
+  api('GET', '/api/state').then((st) => { S.state = st; S.connected = true; render(); });
+} else {
+  connect();
+}
