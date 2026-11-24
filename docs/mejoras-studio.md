@@ -42,3 +42,23 @@ Buscar por texto y filtrar por tipo, riesgo y área. Atajo `/` para buscar.
 
 ## 10. Accesibilidad y celular
 Repaso general: foco visible, `aria-*` en diálogos y columnas, navegación por teclado del tablero, tamaños táctiles en celular.
+
+## 11. Sala de control "Flota en vivo"
+Vista con una fila por agente activo: rol, tarea, qué está haciendo ahora (última actividad, por ejemplo "Developer · editando cart.mjs") y tiempo transcurrido. Se actualiza en vivo con los eventos `activity` que ya emite el servidor.
+- Criterios: muestra todos los agentes en curso a la vez; vacío útil cuando no hay ninguno; legible en celular.
+
+## 12. Línea de tiempo de la noche
+Gráfico tipo Gantt en SVG: una barra por tarea a lo largo de las horas, cada tramo coloreado por etapa (plan, implementación, tests, QA, revisión) a partir de `task.steps`, con marcas de integración y de revert.
+- Criterios: rango de las últimas 24 h por defecto; leyenda de colores; tooltip o detalle al tocar un tramo; sin dependencias.
+
+## 13. Antes y después en cambios visuales
+En el detalle de tareas que tocan la interfaz, mostrar la captura de antes y la de después lado a lado o con un deslizador de comparación (las capturas del QA quedan en la evidencia de la tarea).
+- Criterios: si no hay captura de "antes", se muestra solo la de después sin romper nada; funciona con teclado.
+
+## 14. Modo revisión rápida
+Pantalla que presenta de a una las tareas que esperan decisión (listas para aprobar y propuestas): resumen, evidencia, archivos tocados y veredictos. Atajos: `A` aprobar, `C` pedir cambios, `D` descartar, `→` siguiente, `Esc` salir.
+- Criterios: usa los mismos endpoints que el detalle; muestra el progreso ("3 de 7"); termina con un resumen de lo decidido.
+
+## 15. Avisos y contador en la pestaña
+El título muestra lo pendiente ("(3) Fleet Studio") y el ícono de la pestaña cambia cuando algo necesita atención. Opcional: notificación del sistema (Notification API, pidiendo permiso) cuando una tarea espera tu OK, falla o se revierte.
+- Criterios: el permiso se pide solo al activar la opción en Configuración; sin avisos repetidos por la misma tarea.
